@@ -66,8 +66,33 @@ export async function resolveThread(
     const threads = [...found.values()].sort(
       (a, b) => a._creationTime - b._creationTime,
     );
-    threadId = threads[0]._id;
+    const winner = threads[0];
+    threadId = winner._id;
     for (const loser of threads.slice(1)) {
+      const preserved: Record<string, unknown> = {};
+      if (!winner.inboxManual && loser.inboxManual) {
+        preserved.inboxManual = true;
+        preserved.inbox = loser.inbox;
+        winner.inboxManual = true;
+        winner.inbox = loser.inbox;
+      }
+      if (
+        winner.snoozedUntil === undefined &&
+        loser.snoozedUntil !== undefined
+      ) {
+        preserved.snoozedUntil = loser.snoozedUntil;
+        winner.snoozedUntil = loser.snoozedUntil;
+      }
+      if (Object.keys(preserved).length > 0) {
+        await ctx.db.patch(threadId, preserved);
+      }
+      const refs = await ctx.db
+        .query("threadRefs")
+        .withIndex("by_thread", (q) => q.eq("threadId", loser._id))
+        .collect();
+      for (const ref of refs) {
+        await ctx.db.patch(ref._id, { threadId });
+      }
       const msgs = await ctx.db
         .query("messages")
         .withIndex("by_thread", (q) => q.eq("threadId", loser._id))

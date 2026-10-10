@@ -68,6 +68,8 @@ export default defineSchema({
     lastSyncedAt: v.optional(v.number()),
     nextSyncAfter: v.optional(v.number()),
     initialSyncDone: v.boolean(),
+    foldersDiscoveredAt: v.optional(v.number()),
+    syncFailCount: v.optional(v.number()),
     signatureHtml: v.optional(v.string()),
     capabilities: v.optional(
       v.object({
@@ -288,6 +290,7 @@ export default defineSchema({
     remoteFolderId: v.optional(v.id("folders")),
     remoteUid: v.optional(v.number()),
     remoteDirty: v.boolean(),
+    pushScheduledAt: v.optional(v.number()),
     updatedAt: v.number(),
     createdAt: v.number(),
   })
@@ -357,5 +360,6 @@ export default defineSchema({
     accountId: v.id("accounts"),
     leaseUntil: v.number(),
     owner: v.string(),
+    lastRunAt: v.optional(v.number()),
   }).index("by_account", ["accountId"]),
 });

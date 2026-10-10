@@ -2,8 +2,10 @@ import type { Address, InboxBucket } from "./types";
 
 export const JEV_CATEGORY_THRESHOLD = 0.6;
 export const JEV_MAX_QUESTIONS = 32;
+const FIXED_QUESTION_COUNT = 6;
 const BODY_EXCERPT_MAX = 2000;
-const MAX_THREAD_CONTEXT_MESSAGES = 5;
+const MAX_ATTACHMENTS = 10;
+const MAX_PREVIOUS_MESSAGES = 3;
 
 export interface JevCategoryInput {
   id: string;
@@ -11,136 +13,192 @@ export interface JevCategoryInput {
   description: string;
 }
 
-export interface JevMessageInput {
+export interface JevOwnerInput {
+  name?: string;
+  addresses: string[];
+}
+
+export interface JevEmailInput {
   from: Address;
   to: Address[];
   cc: Address[];
   subject: string;
   date: number;
-  snippet: string;
-  bodyExcerpt?: string;
-  bulk: boolean;
-  isReply: boolean;
-  folderRole: string;
+  folder: string;
+  bodyExcerpt: string;
+  attachments?: string[];
+  headers?: {
+    listUnsubscribe: boolean;
+    listId?: string;
+    precedence?: string;
+    autoSubmitted?: string;
+  };
 }
 
 export interface JevThreadContext {
+  ownerStarted: boolean;
   ownerParticipated: boolean;
-  isDirectReplyToOwner: boolean;
-  previousSenders: string[];
+  directReplyToOwner: boolean;
   messageCount: number;
+  previousMessages: { from: string; snippet: string }[];
 }
 
 export interface JevRequestInput {
-  owner: { emails: string[] };
-  message: JevMessageInput;
+  owner: JevOwnerInput;
+  email: JevEmailInput;
   thread?: JevThreadContext;
   categories: JevCategoryInput[];
   model?: string;
 }
 
-export interface JevQuestion {
-  id: string;
-  type: "choice" | "noul";
-  prompt: string;
-  choices?: { value: string; criteria: string }[];
-  criteria?: string;
-}
+// The API takes `questions` as an object keyed by question id. Choice
+// questions carry a criteria map (option -> description); noul questions
+// carry no criteria.
+export type JevQuestion =
+  | { type: "choice"; instructions: string; criteria: Record<string, string> }
+  | { type: "noul"; instructions: string };
 
 export interface JevRequestBody {
   model?: string;
   state: Record<string, unknown>;
-  questions: JevQuestion[];
+  questions: Record<string, JevQuestion>;
 }
 
-const INBOX_CRITERIA = {
+const INBOX_QUESTION_INSTRUCTIONS =
+  "Which inbox should `email` be filed in for the mailbox owner described " +
+  "in `owner`? Use the sender, headers, body, and `thread` context.";
+
+const INBOX_CRITERIA: Record<string, string> = {
   primary:
-    "Personal mail that needs the owner's attention: genuine human replies in " +
-    "threads the owner started or participated in, direct one-to-one messages, " +
-    "and anything requiring a response or action.",
+    "Relevant to the owner personally: a real person writing to the owner " +
+    "directly, a genuine human reply in a conversation the owner started " +
+    "or took part in, personal correspondence, work or business " +
+    "conversations with people the owner knows or has engaged with, and " +
+    "messages that need the owner's attention, decision, reply, or " +
+    "action (for example security alerts, account problems, or " +
+    "time-sensitive requests).",
   other:
-    "Everything else: automated replies and notifications, receipts and " +
-    "confirmations that need no action, newsletters, promotions, marketing, " +
-    "cold outreach, bulk mail, and spam-like messages.",
+    "Not important to read promptly: newsletters, digests, promotions, " +
+    "marketing, product updates, social and app notifications, automated " +
+    "receipts and confirmations that need no action, automatic replies " +
+    "such as out-of-office and delivery notices (even inside the owner's " +
+    "threads), unsolicited cold outreach or sales pitches from strangers, " +
+    "mass mail, and spam-like messages.",
+};
+
+const FIXED_NOUL_QUESTIONS: Record<string, string> = {
+  automated:
+    "Was `email` generated automatically by a system (a notification, " +
+    "receipt, alert, or auto-reply) rather than written personally by a " +
+    "person?",
+  bulk:
+    "Is `email` a newsletter, promotion, marketing message, or other " +
+    "mass mailing sent to many recipients?",
+  cold_outreach:
+    "Is `email` unsolicited outreach from someone with no prior " +
+    "conversation with the owner, such as a sales pitch, recruiting " +
+    "message, or partnership request?",
+  needs_attention:
+    "Does `email` ask the owner to reply, decide, or take action, or " +
+    "contain information the owner personally needs to know soon, such " +
+    "as a security alert or an account problem?",
+  genuine_reply:
+    "Is `email` a reply written by a real person in a conversation that " +
+    "the owner started or took part in, according to `thread`?",
 };
 
 function buildState(input: JevRequestInput): Record<string, unknown> {
-  const { message, thread, owner } = input;
-  const excerpt = (message.bodyExcerpt ?? message.snippet).slice(
-    0,
-    BODY_EXCERPT_MAX,
-  );
+  const { email, thread, owner } = input;
+  const headers = email.headers;
   return {
-    owner_emails: owner.emails,
-    from: message.from,
-    to: message.to,
-    cc: message.cc,
-    subject: message.subject,
-    date: new Date(message.date).toISOString(),
-    is_reply: message.isReply,
-    is_bulk: message.bulk,
-    folder: message.folderRole,
-    body_excerpt: excerpt,
-    thread: thread
+    owner: {
+      ...(owner.name !== undefined ? { name: owner.name } : {}),
+      addresses: owner.addresses,
+    },
+    email: {
+      from: email.from,
+      to: email.to,
+      cc: email.cc,
+      subject: email.subject,
+      date: new Date(email.date).toISOString(),
+      folder: email.folder,
+      body_excerpt: email.bodyExcerpt.slice(0, BODY_EXCERPT_MAX),
+      attachments: (email.attachments ?? []).slice(0, MAX_ATTACHMENTS),
+      headers: headers
+        ? {
+            list_unsubscribe: headers.listUnsubscribe,
+            ...(headers.listId !== undefined
+              ? { list_id: headers.listId }
+              : {}),
+            ...(headers.precedence !== undefined
+              ? { precedence: headers.precedence }
+              : {}),
+            ...(headers.autoSubmitted !== undefined
+              ? { auto_submitted: headers.autoSubmitted }
+              : {}),
+          }
+        : { list_unsubscribe: false },
+    },
+    ...(thread
       ? {
-          owner_participated: thread.ownerParticipated,
-          direct_reply_to_owner: thread.isDirectReplyToOwner,
-          message_count: thread.messageCount,
-          previous_senders: thread.previousSenders.slice(
-            0,
-            MAX_THREAD_CONTEXT_MESSAGES,
-          ),
+          thread: {
+            owner_started: thread.ownerStarted,
+            owner_participated: thread.ownerParticipated,
+            direct_reply_to_owner: thread.directReplyToOwner,
+            message_count: thread.messageCount,
+            previous_messages: thread.previousMessages.slice(
+              -MAX_PREVIOUS_MESSAGES,
+            ),
+          },
         }
-      : undefined,
+      : {}),
   };
 }
 
-function inboxQuestion(): JevQuestion {
-  return {
-    id: "inbox",
-    type: "choice",
-    prompt: "Which inbox should this email be filed under?",
-    choices: [
-      { value: "primary", criteria: INBOX_CRITERIA.primary },
-      { value: "other", criteria: INBOX_CRITERIA.other },
-    ],
-  };
+function categoryInstructions(cat: JevCategoryInput): string {
+  return (
+    `Does \`email\` clearly belong in the owner's custom category ` +
+    `"${cat.name}"? Category description: ${cat.description}`
+  );
 }
 
-function categoryQuestion(index: number, cat: JevCategoryInput): JevQuestion {
-  return {
-    id: `c${index}`,
-    type: "noul",
-    prompt: `Does this email belong to the category "${cat.name}"?`,
-    criteria: cat.description,
-  };
-}
-
-// One request carries the `inbox` choice plus up to 31 category questions;
-// additional requests carry categories in chunks of 32. Category question ids
-// are `c<globalIndex>` so responses can be mapped back across requests.
+// The first request carries the six fixed questions plus up to 26
+// categories; extra requests carry categories in chunks of 32 with the
+// same state. Category question ids are `c<globalIndex>`.
 export function buildJevRequests(input: JevRequestInput): JevRequestBody[] {
   const state = buildState(input);
   const cats = input.categories;
   const requests: JevRequestBody[] = [];
 
-  const firstCats = cats.slice(0, JEV_MAX_QUESTIONS - 1);
-  requests.push({
-    model: input.model,
-    state,
-    questions: [
-      inboxQuestion(),
-      ...firstCats.map((c, i) => categoryQuestion(i, c)),
-    ],
-  });
+  const firstCats = cats.slice(0, JEV_MAX_QUESTIONS - FIXED_QUESTION_COUNT);
+  const firstQuestions: Record<string, JevQuestion> = {
+    inbox: {
+      type: "choice",
+      instructions: INBOX_QUESTION_INSTRUCTIONS,
+      criteria: { ...INBOX_CRITERIA },
+    },
+  };
+  for (const [id, instructions] of Object.entries(FIXED_NOUL_QUESTIONS)) {
+    firstQuestions[id] = { type: "noul", instructions };
+  }
+  for (let i = 0; i < firstCats.length; i++) {
+    firstQuestions[`c${i}`] = {
+      type: "noul",
+      instructions: categoryInstructions(firstCats[i]),
+    };
+  }
+  requests.push({ model: input.model, state, questions: firstQuestions });
 
   for (let i = firstCats.length; i < cats.length; i += JEV_MAX_QUESTIONS) {
     const chunk = cats.slice(i, i + JEV_MAX_QUESTIONS);
-    requests.push({
-      model: input.model,
-      state,
-      questions: chunk.map((c, j) => categoryQuestion(i + j, c)),
-    });
+    const questions: Record<string, JevQuestion> = {};
+    for (let j = 0; j < chunk.length; j++) {
+      questions[`c${i + j}`] = {
+        type: "noul",
+        instructions: categoryInstructions(chunk[j]),
+      };
+    }
+    requests.push({ model: input.model, state, questions });
   }
 
   return requests;
@@ -158,12 +216,75 @@ export interface JevAnswerNoul {
   noul?: number;
 }
 
+export type JevAnswer = JevAnswerChoice | JevAnswerNoul;
+
 export interface JevResponseBody {
-  answers?: Record<string, JevAnswerChoice | JevAnswerNoul | undefined>;
+  answers?: Record<string, JevAnswer | undefined>;
+}
+
+export function mergeJevAnswers(
+  responses: JevResponseBody[],
+): Record<string, JevAnswer | undefined> {
+  const answers: Record<string, JevAnswer | undefined> = {};
+  for (const res of responses) {
+    Object.assign(answers, res.answers ?? {});
+  }
+  return answers;
+}
+
+export function noulValue(
+  answers: Record<string, JevAnswer | undefined>,
+  id: string,
+): number | undefined {
+  const a = answers[id];
+  return a && a.type === "noul" ? a.noul : undefined;
+}
+
+const GENUINE_REPLY_MIN = 0.6;
+const AUTOMATED_REPLY_MAX = 0.5;
+const NEEDS_ATTENTION_MIN = 0.75;
+const OTHER_MIN = 0.6;
+
+export function decideInbox(
+  answers: Record<string, JevAnswer | undefined>,
+  opts: { folderRole: string },
+): InboxBucket {
+  if (opts.folderRole === "junk") return "other";
+  const genuineReply = noulValue(answers, "genuine_reply");
+  const automated = noulValue(answers, "automated");
+  const bulk = noulValue(answers, "bulk");
+  const coldOutreach = noulValue(answers, "cold_outreach");
+  const needsAttention = noulValue(answers, "needs_attention");
+  if (
+    genuineReply !== undefined &&
+    genuineReply >= GENUINE_REPLY_MIN &&
+    (automated === undefined || automated < AUTOMATED_REPLY_MAX)
+  ) {
+    return "primary";
+  }
+  if (needsAttention !== undefined && needsAttention >= NEEDS_ATTENTION_MIN) {
+    return "primary";
+  }
+  if (
+    (automated !== undefined && automated >= OTHER_MIN) ||
+    (bulk !== undefined && bulk >= OTHER_MIN) ||
+    (coldOutreach !== undefined && coldOutreach >= OTHER_MIN)
+  ) {
+    return "other";
+  }
+  const inboxAnswer = answers["inbox"];
+  if (
+    inboxAnswer &&
+    inboxAnswer.type === "choice" &&
+    (inboxAnswer.choice === "primary" || inboxAnswer.choice === "other")
+  ) {
+    return inboxAnswer.choice;
+  }
+  return "primary";
 }
 
 export interface ParsedJevClassification {
-  inbox: InboxBucket | null;
+  inbox: InboxBucket;
   inboxConfidence?: number;
   categoryIds: string[];
 }
@@ -171,36 +292,20 @@ export interface ParsedJevClassification {
 export function parseJevResponses(
   responses: JevResponseBody[],
   categories: JevCategoryInput[],
+  opts: { folderRole: string },
 ): ParsedJevClassification {
-  const answers: Record<string, JevAnswerChoice | JevAnswerNoul | undefined> =
-    {};
-  for (const res of responses) {
-    Object.assign(answers, res.answers ?? {});
-  }
-
-  let inbox: InboxBucket | null = null;
-  let inboxConfidence: number | undefined;
+  const answers = mergeJevAnswers(responses);
   const inboxAnswer = answers["inbox"];
-  if (inboxAnswer && inboxAnswer.type === "choice") {
-    const choice = inboxAnswer.choice;
-    if (choice === "primary" || choice === "other") inbox = choice;
-    inboxConfidence = inboxAnswer.confidence;
-  }
-
-  const categoryIds: string[] = [];
-  for (let i = 0; i < categories.length; i++) {
-    const answer = answers[`c${i}`];
-    if (
-      answer &&
-      answer.type === "noul" &&
-      typeof answer.noul === "number" &&
-      answer.noul >= JEV_CATEGORY_THRESHOLD
-    ) {
-      categoryIds.push(categories[i].id);
-    }
-  }
-
-  return { inbox, inboxConfidence, categoryIds };
+  return {
+    inbox: decideInbox(answers, opts),
+    inboxConfidence:
+      inboxAnswer && inboxAnswer.type === "choice"
+        ? inboxAnswer.confidence
+        : undefined,
+    categoryIds: categories
+      .filter((_, i) => (noulValue(answers, `c${i}`) ?? 0) >= JEV_CATEGORY_THRESHOLD)
+      .map((c) => c.id),
+  };
 }
 
 export interface HeuristicInput {
@@ -218,7 +323,7 @@ export interface HeuristicInput {
 }
 
 const NOREPLY_RE =
-  /^(no[-_.]?reply|donotreply|do[-_.]?not[-_.]?reply|notifications?|notify|mailer[-_.]?daemon|bounce[ds]?|newsletter|news|updates?|marketing|promo|promotions|info|hello|support|bot|auto)@/i;
+  /^(no[-_.]?reply|donotreply|do[-_.]?not[-_.]?reply|notifications?|mailer[-_.]?daemon|bounce[ds]?|newsletters?|marketing|promo|promotions|automated?)@/i;
 
 export function heuristicClassify(input: HeuristicInput): InboxBucket {
   if (input.folderRole === "junk") return "other";
@@ -236,6 +341,5 @@ export function heuristicClassify(input: HeuristicInput): InboxBucket {
     return "other";
   }
   if (NOREPLY_RE.test(input.from.email)) return "other";
-  if (input.isReplyToOwnerThread) return "primary";
   return "primary";
 }

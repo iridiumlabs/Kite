@@ -9,14 +9,20 @@ export type FlagOp = {
   uid: number;
   add: string[];
   remove: string[];
+  messageId?: Id<"messages">;
 };
 export type MoveOp = {
   folderPath: string;
   uid: number;
   targetRole: string;
   targetPath?: string;
+  messageId?: Id<"messages">;
 };
-export type ExpungeOp = { folderPath: string; uid: number };
+export type ExpungeOp = {
+  folderPath: string;
+  uid: number;
+  messageId?: Id<"messages">;
+};
 export type PendingOpPayloads = {
   flags: { updates: FlagOp[] };
   move: { moves: MoveOp[] };

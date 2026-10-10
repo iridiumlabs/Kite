@@ -1,11 +1,14 @@
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import {
+  action,
+  internalQuery,
   mutation,
   query,
   MutationCtx,
   QueryCtx,
 } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./model/auth";
 import { recomputeThread, writeThread } from "./model/threads";
@@ -149,6 +152,7 @@ export const setRead = mutation({
           uid: m.uid,
           add: args.read ? ["\\Seen"] : [],
           remove: args.read ? [] : ["\\Seen"],
+          messageId: m._id,
         });
         ops.set(m.accountId, list);
       }
@@ -190,6 +194,7 @@ export const setStarred = mutation({
           uid: m.uid,
           add: args.starred ? ["\\Flagged"] : [],
           remove: args.starred ? [] : ["\\Flagged"],
+          messageId: m._id,
         });
         ops.set(m.accountId, list);
       }
@@ -202,6 +207,7 @@ export const setStarred = mutation({
 });
 
 const INBOX_ROLES: MessageFolderRole[] = ["inbox", "junk"];
+const TRASHABLE_ROLES: MessageFolderRole[] = ["inbox", "junk", "archive"];
 
 async function moveToFolderRole(
   ctx: MutationCtx,
@@ -235,6 +241,7 @@ async function moveToFolderRole(
         uid: m.uid,
         targetRole,
         targetPath: target?.path ?? (targetRole === "inbox" ? "INBOX" : undefined),
+        messageId: m._id,
       });
       ops.set(m.accountId, list);
     }
@@ -281,7 +288,7 @@ export const trash = mutation({
       ctx,
       userId,
       targets,
-      (m) => m.folderRole !== "trash",
+      (m) => TRASHABLE_ROLES.includes(m.folderRole),
       "trash",
     );
   },
@@ -348,6 +355,7 @@ export const moveToInbox = mutation({
               uid: m.uid,
               targetRole: "inbox",
               targetPath: inboxFolder?.path ?? "INBOX",
+              messageId: m._id,
             });
             ops.set(m.accountId, list);
           }
@@ -472,7 +480,7 @@ export const deleteForever = mutation({
         const path = await folderPath(ctx, paths, m.folderId);
         if (m.uid !== undefined && path) {
           const list = ops.get(m.accountId) ?? [];
-          list.push({ folderPath: path, uid: m.uid });
+          list.push({ folderPath: path, uid: m.uid, messageId: m._id });
           ops.set(m.accountId, list);
         }
         await ctx.db.delete(m._id);
@@ -726,11 +734,14 @@ const VIEW_ROLES: Record<string, MessageFolderRole[]> = {
 };
 
 // Structured message search. Picks the date-ordered role index (per account
-// when accountId is given, otherwise per user), applies a bounded residual
-// scan (at most 500 documents examined per call) and returns an opaque
-// continuation cursor. Pages may be short when filters drop most rows; call
-// again with continueCursor until isDone. Results are date-desc within the
-// examined window.
+// when accountId is given, otherwise per user), puts the after/before bounds
+// into the index range and applies a bounded residual scan (at most 500
+// documents examined per call) using .take() so only one read pattern is
+// used per query. The continuation cursor is {ri, d, skip}: the role index,
+// the last examined date, and the ids already returned at that exact date.
+// Pages may be short when filters drop most rows; call again with
+// continueCursor until isDone. Results are date-desc within the examined
+// window.
 export const findMessages = query({
   args: {
     ...apiKeyArg,
@@ -776,13 +787,15 @@ export const findMessages = query({
 
     const roles = args.view ? VIEW_ROLES[args.view] : ALL_ROLES;
 
-    let startRi = 0;
-    let cursor: string | null = null;
+    let ri = 0;
+    let cursorDate: number | undefined;
+    let skipIds = new Set<string>();
     if (args.cursor) {
       try {
         const decoded = JSON.parse(args.cursor);
-        startRi = decoded.ri ?? 0;
-        cursor = decoded.c ?? null;
+        ri = decoded.ri ?? 0;
+        cursorDate = decoded.d;
+        skipIds = new Set(decoded.skip ?? []);
       } catch {
         throw new Error("Invalid cursor");
       }
@@ -826,42 +839,72 @@ export const findMessages = query({
       if (subjectNeedle && !m.subject.toLowerCase().includes(subjectNeedle)) {
         return false;
       }
-      if (args.after !== undefined && m.date <= args.after) return false;
-      if (args.before !== undefined && m.date >= args.before) return false;
       return true;
     };
 
     const items: Doc<"messages">[] = [];
     let examined = 0;
-    let ri = startRi;
-    while (ri < roles.length && examined < FIND_SCAN_BUDGET && items.length < limit) {
-      const remaining = Math.min(limit - items.length, FIND_SCAN_BUDGET - examined);
+    let nextCursor:
+      | { ri: number; d?: number; skip?: string[] }
+      | null = null;
+
+    while (
+      ri < roles.length &&
+      examined < FIND_SCAN_BUDGET &&
+      items.length < limit
+    ) {
       const role = roles[ri];
-      const q = args.accountId
-        ? ctx.db
-            .query("messages")
-            .withIndex("by_account_role_date", (qq) =>
-              qq
-                .eq("accountId", args.accountId!)
-                .eq("folderRole", role),
-            )
-            .order("desc")
-        : ctx.db
-            .query("messages")
-            .withIndex("by_user_role_date", (qq) =>
-              qq.eq("userId", userId).eq("folderRole", role),
-            )
-            .order("desc");
-      const page = await q.paginate({ numItems: remaining, cursor });
-      examined += page.page.length;
-      for (const m of page.page) {
+      const budget = FIND_SCAN_BUDGET - examined;
+      const docs = await ctx.db
+        .query("messages")
+        .withIndex(
+          args.accountId ? "by_account_role_date" : "by_user_role_date",
+          (q) => {
+            const base = args.accountId
+              ? q.eq("accountId", args.accountId!).eq("folderRole", role)
+              : q.eq("userId", userId).eq("folderRole", role);
+            // One upper bound call maximum: cursorDate is inclusive, so it
+            // becomes an exclusive bound half a millisecond above it.
+            const upper = Math.min(
+              args.before ?? Number.POSITIVE_INFINITY,
+              cursorDate !== undefined
+                ? cursorDate + 0.5
+                : Number.POSITIVE_INFINITY,
+            );
+            const hasUpper = upper !== Number.POSITIVE_INFINITY;
+            if (args.after !== undefined && hasUpper) {
+              return base.gt("date", args.after).lt("date", upper);
+            }
+            if (args.after !== undefined) return base.gt("date", args.after);
+            if (hasUpper) return base.lt("date", upper);
+            return base;
+          },
+        )
+        .order("desc")
+        .take(budget);
+
+      examined += docs.length;
+      const exhausted = docs.length < budget;
+      for (const m of docs) {
+        if (cursorDate !== undefined && m.date === cursorDate && skipIds.has(m._id)) {
+          continue;
+        }
         if (matches(m)) items.push(m);
       }
-      if (page.isDone) {
+
+      if (exhausted) {
         ri++;
-        cursor = null;
+        cursorDate = undefined;
+        skipIds = new Set();
+        nextCursor = { ri };
       } else {
-        cursor = page.continueCursor;
+        const last = docs[docs.length - 1];
+        const skip = docs
+          .filter((m) => m.date === last.date)
+          .filter((m) => skipIds.has(m._id) || items.some((i) => i._id === m._id))
+          .map((m) => m._id as string);
+        nextCursor = { ri, d: last.date, skip };
+        break;
       }
     }
 
@@ -871,7 +914,7 @@ export const findMessages = query({
       items,
       continueCursor: isDone
         ? null
-        : JSON.stringify({ ri, c: cursor }),
+        : JSON.stringify(nextCursor ?? { ri }),
       isDone,
       examined,
     };
@@ -889,5 +932,105 @@ export const counts = query({
     const out: Record<string, number> = {};
     for (const d of docs) out[d.key] = d.count;
     return out;
+  },
+});
+
+const folderRoleArg = v.union(
+  v.literal("inbox"),
+  v.literal("sent"),
+  v.literal("drafts"),
+  v.literal("archive"),
+  v.literal("trash"),
+  v.literal("junk"),
+);
+
+// Backfills the next window of older UIDs for the account's folders.
+export const loadOlder = action({
+  args: {
+    ...apiKeyArg,
+    accountId: v.optional(v.id("accounts")),
+    role: v.optional(folderRoleArg),
+  },
+  handler: async (ctx, args): Promise<{ scheduled: number }> => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const accounts = args.accountId
+      ? [await ctx.runQuery(internal.send.accountForSend, {
+          accountId: args.accountId,
+          userId,
+        })]
+      : await ctx.runQuery(internal.mail.accountsOfUser, { userId });
+    let scheduled = 0;
+    for (const account of accounts) {
+      if (!account) continue;
+      await ctx.scheduler.runAfter(
+        0,
+        internal.node.sync.loadOlderInternal,
+        { accountId: account._id, role: args.role },
+      );
+      scheduled++;
+    }
+    return { scheduled };
+  },
+});
+
+export const accountsOfUser = internalQuery({
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("accounts")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .collect();
+  },
+});
+
+export const messageDocsByIds = internalQuery({
+  args: { ids: v.array(v.id("messages")) },
+  handler: async (ctx, args) => {
+    const docs: Doc<"messages">[] = [];
+    for (const id of args.ids) {
+      const doc = await ctx.db.get(id);
+      if (doc) docs.push(doc);
+    }
+    return docs;
+  },
+});
+
+// IMAP-side search across synced folders; ingests hits not yet in the DB and
+// returns full message metadata.
+export const deepSearch = action({
+  args: {
+    ...apiKeyArg,
+    query: v.string(),
+    accountId: v.optional(v.id("accounts")),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<Doc<"messages">[]> => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const limit = Math.min(args.limit ?? 50, 50);
+    const accounts = args.accountId
+      ? [await ctx.runQuery(internal.send.accountForSend, {
+          accountId: args.accountId,
+          userId,
+        })]
+      : await ctx.runQuery(internal.mail.accountsOfUser, { userId });
+    const messageIds: Id<"messages">[] = [];
+    for (const account of accounts) {
+      if (!account) continue;
+      const res = await ctx.runAction(internal.node.sync.deepSearchInternal, {
+        accountId: account._id,
+        query: args.query,
+        limit: limit - messageIds.length,
+      });
+      for (const id of res.messageIds ?? []) {
+        messageIds.push(id as Id<"messages">);
+        if (messageIds.length >= limit) break;
+      }
+      if (messageIds.length >= limit) break;
+    }
+    const docs: Doc<"messages">[] = await ctx.runQuery(
+      internal.mail.messageDocsByIds,
+      { ids: messageIds },
+    );
+    return docs.filter((d) => d.userId === userId);
   },
 });

@@ -129,7 +129,14 @@ export async function ingestMessage(
           .eq("messageIdHeader", input.messageIdHeader),
       )
       .collect();
-    const localPlaceholder = sameId.find((m) => m.folderRole === "local");
+    // A local-only placeholder (folderRole "local", or a Sent copy we
+    // inserted before the server had it) is upgraded in place instead of
+    // duplicated.
+    const localPlaceholder = sameId.find(
+      (m) =>
+        m.folderRole === "local" ||
+        (m.folderRole === "sent" && m.uid === undefined),
+    );
     if (localPlaceholder && input.folderRole !== "local") {
       const patch = patchIfChanged(localPlaceholder, {
         folderId: input.folderId,

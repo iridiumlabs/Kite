@@ -180,7 +180,7 @@ describe("summarizeThread", () => {
       OWNER,
       NOW,
     );
-    expect(s.subject).toBe("Real");
+    expect(s.subject).toBe("Fwd: Real");
     expect(s.snippet).toBe("latest body");
     expect(s.hasDraft).toBe(true);
   });

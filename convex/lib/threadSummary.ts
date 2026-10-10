@@ -1,5 +1,4 @@
 import { isOwner } from "./addresses";
-import { normalizeSubject } from "./subject";
 import type {
   Address,
   InboxBucket,
@@ -122,7 +121,7 @@ export function summarizeThread(
   const allParticipants = [...participants, ...owner].slice(0, 4);
 
   return {
-    subject: normalizeSubject(latest?.subject ?? ""),
+    subject: latest?.subject ?? "",
     participants: allParticipants,
     messageCount: messages.length,
     unreadCount,

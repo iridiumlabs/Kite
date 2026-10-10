@@ -132,11 +132,19 @@ export async function writeThread(
   }
   if (Object.keys(patch).length > 0) await ctx.db.patch(before._id, patch);
   await applyCounterDiffs(ctx, next.userId, diffCounters(before, next));
-  const joinRows = await ctx.db
-    .query("threadCategories")
-    .withIndex("by_thread", (q) => q.eq("threadId", before._id))
-    .collect();
-  await syncThreadCategories(ctx, before._id, next, joinRows);
+  const joinRowsUnchanged =
+    (before.categoryIds.length === 0 && next.categoryIds.length === 0) ||
+    (deepEqual(before.categoryIds, next.categoryIds) &&
+      before.listKey === next.listKey &&
+      before.lastMessageAt === next.lastMessageAt &&
+      before.unread === next.unread);
+  if (!joinRowsUnchanged) {
+    const joinRows = await ctx.db
+      .query("threadCategories")
+      .withIndex("by_thread", (q) => q.eq("threadId", before._id))
+      .collect();
+    await syncThreadCategories(ctx, before._id, next, joinRows);
+  }
   return before._id;
 }
 

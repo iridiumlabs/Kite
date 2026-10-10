@@ -41,7 +41,7 @@ async function listKeys(t: T, userId: string, view: string) {
       view: view as never,
       paginationOpts: PAGE,
     });
-  return res.page.map((th) => th._id);
+  return res.page.map((th: { _id: Id<"threads"> }) => th._id);
 }
 
 async function threadOf(t: T, userId: string, threadId: Id<"threads">) {
@@ -155,6 +155,73 @@ describe("threading", () => {
       }),
     ).rejects.toThrow();
   });
+
+  test("after merge, a message referencing only a loser ref lands in the winner", async () => {
+    const t = makeT();
+    const accountId = await seedAccount(t, USER);
+    const a = await ingest(
+      t,
+      makeMessage(USER, accountId, { messageIdHeader: "a@x" }),
+    );
+    await ingest(
+      t,
+      makeMessage(USER, accountId, { messageIdHeader: "b@x" }),
+    );
+    await ingest(
+      t,
+      makeMessage(USER, accountId, {
+        messageIdHeader: "c@x",
+        references: ["a@x", "b@x"],
+      }),
+    );
+    const d = await ingest(
+      t,
+      makeMessage(USER, accountId, {
+        messageIdHeader: "d@x",
+        inReplyTo: "b@x",
+      }),
+    );
+    expect(d.threadId).toBe(a.threadId);
+    const { messages } = await t
+      .withIdentity({ subject: USER })
+      .query(api.mail.getThread, { threadId: a.threadId });
+    expect(messages).toHaveLength(4);
+  });
+
+  test("merge preserves the loser inboxManual, inbox and snoozedUntil", async () => {
+    const t = makeT();
+    const asU = t.withIdentity({ subject: USER });
+    const accountId = await seedAccount(t, USER);
+    const a = await ingest(
+      t,
+      makeMessage(USER, accountId, { messageIdHeader: "a@x" }),
+    );
+    const b = await ingest(
+      t,
+      makeMessage(USER, accountId, { messageIdHeader: "b@x" }),
+    );
+    await asU.mutation(api.mail.moveToInbox, {
+      threadIds: [b.threadId],
+      inbox: "other",
+    });
+    const until = Date.now() + 60_000;
+    await asU.mutation(api.mail.snooze, {
+      threadIds: [b.threadId],
+      until,
+    });
+    const c = await ingest(
+      t,
+      makeMessage(USER, accountId, {
+        messageIdHeader: "c@x",
+        references: ["a@x", "b@x"],
+      }),
+    );
+    expect(c.threadId).toBe(a.threadId);
+    const thread = await threadOf(t, USER, a.threadId);
+    expect(thread.inboxManual).toBe(true);
+    expect(thread.inbox).toBe("other");
+    expect(thread.snoozedUntil).toBe(until);
+  });
 });
 
 describe("archive and restore", () => {
@@ -183,7 +250,7 @@ describe("archive and restore", () => {
           categoryId: catId,
           paginationOpts: PAGE,
         })
-      ).page.map((th) => th._id);
+      ).page.map((th: { _id: Id<"threads"> }) => th._id);
 
     expect(await listKeys(t, USER, "primary")).toContain(threadId);
     expect(await inCategory()).toContain(threadId);
@@ -290,7 +357,7 @@ describe("auth", () => {
       view: "primary",
       paginationOpts: PAGE,
     });
-    expect(threads.page.map((x) => x._id)).toContain(threadId);
+    expect(threads.page.map((x: { _id: Id<"threads"> }) => x._id)).toContain(threadId);
 
     await expect(t.query(api.mail.counts, {})).rejects.toThrow();
 
