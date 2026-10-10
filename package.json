@@ -1,0 +1,47 @@
+{
+  "name": "post",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p convex/tsconfig.json",
+    "test": "vitest run",
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy"
+  },
+  "dependencies": {
+    "@clerk/nextjs": "7.9.10",
+    "convex": "1.46.0",
+    "imapflow": "2.2.0",
+    "mailparser": "3.9.35",
+    "next": "16.3.8",
+    "nodemailer": "10.0.14",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "sanitize-html": "2.18.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "5.0.0",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "24.19.0",
+    "@types/nodemailer": "8.0.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/sanitize-html": "2.16.2",
+    "convex-test": "0.0.60",
+    "eslint": "^9.38.0",
+    "eslint-config-next": "16.3.8",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vitest": "5.0.3"
+  },
+  "allowScripts": {
+    "esbuild@0.27.0": true,
+    "unrs-resolver@1.12.2": true
+  }
+}

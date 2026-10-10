@@ -1,0 +1,313 @@
+Frame "Post – Inbox (email selected)" (1-0) 1440×900
+  Frame "Sidebar" (2-0) 240×900
+    Frame "Profile Row" (C-0) 219×52
+      Frame "Profile Trigger" (D-0) 183×32
+        Frame "Frame" (E-0) 22×22
+          Text "A" (F-0) 9×14 "A"
+        Text "Arham" (G-0) 42×16 "Arham"
+        SVG "SVG" (H-0) 12×12
+          SVGVisualElement "Path" (I-0) 5×3
+          SVGVisualElement "Path" (J-0) 5×3
+      Frame "Compose Button" (K-0) 30×30
+        SVG "SVG" (L-0) 17×17
+          SVGVisualElement "Path" (M-0) 13×13
+          SVGVisualElement "Path" (N-0) 10×10
+    Frame "Mailboxes" (O-0) 219×179
+      Frame "Mailbox / Primary (selected)" (P-0) 219×28
+        SVG "SVG" (Q-0) 16×16
+          SVGVisualElement "Polyline" (R-0) 13×2
+          SVGVisualElement "Path" (S-0) 13×11
+        Text "Primary" (T-0) 149×16 "Primary"
+        Text "12" (U-0) 16×16 "12"
+      Frame "Frame" (V-0) 219×28
+        SVG "SVG" (W-0) 16×16
+          SVGVisualElement "Path" (X-0) 13×7
+          SVGVisualElement "Path" (Y-0) 13×3
+          SVGVisualElement "Path" (Z-0) 13×3
+        Text "Other" (10-0) 157×16 "Other"
+        Text "3" (11-0) 8×16 "3"
+      Frame "Frame" (12-0) 219×28
+        SVG "SVG" (13-0) 16×16
+          SVGVisualElement "Path" (14-0) 13×13
+          SVGVisualElement "Path" (15-0) 7×7
+        Text "Sent" (16-0) 175×16 "Sent"
+      Frame "Frame" (17-0) 219×28
+        SVG "SVG" (18-0) 16×16
+          SVGVisualElement "Path" (19-0) 11×13
+          SVGVisualElement "Path" (1A-0) 4×4
+        Text "Drafts" (1B-0) 157×16 "Drafts"
+        Text "2" (1C-0) 8×16 "2"
+      Frame "Frame" (1D-0) 219×28
+        SVG "SVG" (1E-0) 16×16
+          SVGVisualElement "Rect" (1F-0) 13×3
+          SVGVisualElement "Path" (1G-0) 11×9
+          SVGVisualElement "Path" (1H-0) 3×?
+        Text "Archive" (1I-0) 175×16 "Archive"
+      Frame "Frame" (1J-0) 219×28
+        SVG "SVG" (1K-0) 16×16
+          SVGVisualElement "Path" (1L-0) 12×?
+          SVGVisualElement "Path" (1M-0) 9×11
+          SVGVisualElement "Path" (1N-0) 5×3
+        Text "Trash" (1O-0) 175×16 "Trash"
+    Frame "Section / Categories" (1Q-0) 219×131
+      Frame "Frame" (1R-0) 219×26
+        Frame "Frame" (1S-0) 69×14
+          Text "Categories" (1T-0) 55×14 "Categories"
+          SVG "SVG" (1U-0) 10×10
+            ... 1 children
+        Frame "Frame" (1W-0) 20×20
+          SVG "SVG" (1X-0) 13×13
+            ... 2 children
+      Frame "Frame" (20-0) 219×28
+        Frame "Frame" (21-0) 16×16
+          Rectangle "Rectangle" (22-0) 8×8
+        Text "Murmurs" (23-0) 158×16 "Murmurs"
+        Text "4" (24-0) 7×16 "4"
+      Frame "Frame" (25-0) 219×28
+        Frame "Frame" (26-0) 16×16
+          Rectangle "Rectangle" (27-0) 8×8
+        Text "Support" (28-0) 158×16 "Support"
+        Text "1" (29-0) 7×16 "1"
+      Frame "Frame" (2A-0) 219×28
+        Frame "Frame" (2B-0) 16×16
+          Rectangle "Rectangle" (2C-0) 8×8
+        Text "Outreach" (2D-0) 175×16 "Outreach"
+    Frame "Section / Accounts" (2E-0) 219×102
+      Frame "Frame" (2F-0) 219×26
+        Frame "Frame" (2G-0) 61×14
+          Text "Accounts" (2H-0) 47×14 "Accounts"
+          SVG "SVG" (2I-0) 10×10
+            ... 1 children
+        Frame "Frame" (2K-0) 20×20
+          SVG "SVG" (2L-0) 13×13
+            ... 2 children
+      Frame "Frame" (2O-0) 219×28
+        Frame "Frame" (2P-0) 16×16
+          Text "A" (2Q-0) 7×12 "A"
+        Text "arham@gmail.com" (2R-0) 158×16 "arham@gmail.com"
+        Text "9" (2S-0) 7×16 "9"
+      Frame "Frame" (2T-0) 219×28
+        Frame "Frame" (2U-0) 16×16
+          Text "P" (2V-0) 6×12 "P"
+        Text "arham@postmail.app" (2W-0) 158×16 "arham@postmail.app"
+        Text "3" (2X-0) 7×16 "3"
+  Frame "Message List" (2Z-0) 380×900
+    Frame "List Header" (30-0) 379×52
+      Frame "Frame" (31-0) 121×18
+        Text "Primary" (32-0) 57×18 "Primary"
+        Text "12 unread" (33-0) 56×16 "12 unread"
+      Frame "Frame" (34-0) 28×28
+        SVG "SVG" (35-0) 17×17
+          SVGVisualElement "Path" (36-0) 13×?
+          SVGVisualElement "Path" (37-0) 7×?
+          SVGVisualElement "Path" (38-0) 3×?
+    Frame "Search" (39-0) 379×40
+      Frame "Frame" (3A-0) 355×30
+        SVG "SVG" (3B-0) 14×14
+          SVGVisualElement "Circle" (3C-0) 9×9
+          SVGVisualElement "Path" (3D-0) 2×2
+        Text "Search" (3E-0) 280×16 "Search"
+        Frame "Frame" (3F-0) 30×18
+          Text "⌘K" (3G-0) 20×14 "⌘K"
+    Frame "Rows" (3J-0) 379×738
+      Frame "Row / Selected" (3K-0) 363×72
+        Rectangle "Rectangle" (3L-0) 10×52
+        Frame "Frame" (3M-0) 329×52
+          Frame "Frame" (3N-0) 329×16
+            ... 2 children
+          Text "Re: Post beta onboar…" (3S-0) 329×16 "Re: Post beta onboarding feedback"
+          Text "Went through the new…" (3T-0) 329×16 "Went through the new import flow twice this morning. The OAu"
+      Frame "Row / Unread" (3U-0) 363×72
+        Frame "Frame" (3V-0) 10×52
+          Rectangle "Rectangle" (3W-0) 8×8
+        Frame "Frame" (3X-0) 329×52
+          Frame "Frame" (3Y-0) 329×16
+            ... 2 children
+          Text "Your payout of $4,28…" (41-0) 329×16 "Your payout of $4,280.00 is on the way"
+          Text "Expected to arrive i…" (42-0) 329×16 "Expected to arrive in your account ending 4421 on Tuesday, O"
+      Frame "Frame" (43-0) 363×72
+        Frame "Frame" (44-0) 10×52
+          Rectangle "Rectangle" (45-0) 8×8
+        Frame "Frame" (46-0) 329×52
+          Frame "Frame" (47-0) 329×16
+            ... 2 children
+          Text "Dinner Thursday?" (4A-0) 329×16 "Dinner Thursday?"
+          Text "We found a tiny Geor…" (4B-0) 329×16 "We found a tiny Georgian place in Kreuzberg. Khachapuri the "
+      Frame "Frame" (4C-0) 363×72
+        Frame "Frame" (4D-0) 10×52
+          Rectangle "Rectangle" (4E-0) 8×8
+        Frame "Frame" (4F-0) 329×52
+          Frame "Frame" (4G-0) 329×16
+            ... 2 children
+          Text "Contract draft v2" (4O-0) 329×16 "Contract draft v2"
+          Text "Attached the revised…" (4P-0) 329×16 "Attached the revised SOW with the milestones we discussed. S"
+      Frame "Row / Read" (4Q-0) 363×72
+        Rectangle "Rectangle" (4R-0) 10×52
+        Frame "Frame" (4S-0) 329×52
+          Frame "Frame" (4T-0) 329×16
+            ... 2 children
+          Text "[post/app] Fix threa…" (4W-0) 329×16 "[post/app] Fix thread grouping for forwarded messages (#214)"
+          Text "@lena-dev approved t…" (4X-0) 329×16 "@lena-dev approved these changes. Looks great, merging once "
+      Frame "Frame" (4Z-0) 363×72
+        Rectangle "Rectangle" (50-0) 10×52
+        Frame "Frame" (51-0) 329×52
+          Frame "Frame" (52-0) 329×16
+            ... 2 children
+          Text "Murmurs #12: notes f…" (57-0) 329×16 "Murmurs #12: notes from the listening session"
+          Text "Transcribed the voic…" (58-0) 329×16 "Transcribed the voice memos. A few quotes are worth pulling "
+      Frame "Frame" (59-0) 363×72
+        Frame "Frame" (5A-0) 10×52
+          Rectangle "Rectangle" (5B-0) 8×8
+        Frame "Frame" (5C-0) 329×52
+          Frame "Frame" (5D-0) 329×16
+            ... 2 children
+          Text "Re: Intro, Post × Ha…" (5I-0) 329×16 "Re: Intro, Post × Halcyon"
+          Text "Thanks for the intro…" (5J-0) 329×16 "Thanks for the intro, Arham! I'd love to hear how you're thi"
+      Frame "Frame" (5K-0) 363×72
+        Rectangle "Rectangle" (5L-0) 10×52
+        Frame "Frame" (5M-0) 329×52
+          Frame "Frame" (5N-0) 329×16
+            ... 2 children
+          Text "Deployment ready: po…" (5Q-0) 329×16 "Deployment ready: post-web"
+          Text "Production deploymen…" (5R-0) 329×16 "Production deployment for main (a3f9c21) completed in 41 sec"
+      Frame "Frame" (5S-0) 363×72
+        Rectangle "Rectangle" (5T-0) 10×52
+        Frame "Frame" (5U-0) 329×52
+          Frame "Frame" (5V-0) 329×16
+            ... 2 children
+          Text "Quick question about…" (60-0) 329×16 "Quick question about the API"
+          Text "Is there a way to fe…" (61-0) 329×16 "Is there a way to fetch threads by category through the MCP "
+      Frame "Frame" (62-0) 363×72
+        Rectangle "Rectangle" (63-0) 10×52
+        Frame "Frame" (64-0) 329×52
+          Frame "Frame" (65-0) 329×16
+            ... 2 children
+          Text "Your receipt from Ap…" (68-0) 329×16 "Your receipt from Apple"
+          Text "Apple Developer Prog…" (69-0) 329×16 "Apple Developer Program · Annual membership · $99.00"
+  Frame "Reader" (6B-0) 820×900
+    Frame "Reader Toolbar" (6C-0) 820×52
+      Frame "Frame" (6D-0) 181×28
+        Frame "Frame" (6E-0) 32×28
+          SVG "SVG" (6F-0) 17×17
+            ... 3 children
+        Frame "Frame" (6J-0) 32×28
+          SVG "SVG" (6K-0) 17×17
+            ... 3 children
+        Rectangle "Rectangle" (6O-0) 1×16
+        Frame "Frame" (6P-0) 32×28
+          SVG "SVG" (6Q-0) 17×17
+            ... 2 children
+        Frame "Frame" (6T-0) 32×28
+          SVG "SVG" (6U-0) 17×17
+            ... 2 children
+        Frame "Frame" (6X-0) 32×28
+          SVG "SVG" (6Y-0) 17×17
+            ... 2 children
+      Frame "Frame" (71-0) 137×28
+        Frame "Frame" (72-0) 32×28
+          SVG "SVG" (73-0) 17×17
+            ... 1 children
+        Frame "Frame" (75-0) 32×28
+          SVG "SVG" (76-0) 17×17
+            ... 3 children
+        Rectangle "Rectangle" (7A-0) 1×16
+        Frame "Frame" (7B-0) 28×28
+          SVG "SVG" (7C-0) 17×17
+            ... 1 children
+        Frame "Frame" (7E-0) 28×28
+          SVG "SVG" (7F-0) 17×17
+            ... 1 children
+    Frame "Thread" (7H-0) 820×742
+      Frame "Thread Header" (7I-0) 708×72
+        Text "Re: Post beta onboar…" (7J-0) 708×28 "Re: Post beta onboarding feedback"
+        Frame "Frame" (7K-0) 708×16
+          Text "3 messages" (7L-0) 69×16 "3 messages"
+          Text "·" (7M-0) 4×16 "·"
+          Text "arham@gmail.com" (7N-0) 106×16 "arham@gmail.com"
+      Frame "Message / Collapsed" (7O-0) 708×52
+        Frame "Frame" (7P-0) 28×28
+          Text "A" (7Q-0) 9×14 "A"
+        Text "Arham" (7R-0) 96×16 "Arham"
+        Text "Hey Maya, the new be…" (7S-0) 517×16 "Hey Maya, the new beta build is up on TestFlight. Would love"
+        Text "Oct 9" (7T-0) 31×16 "Oct 9"
+      Frame "Message / Collapsed" (7U-0) 708×52
+        Frame "Frame" (7V-0) 28×28
+          Text "MO" (7W-0) 19×14 "MO"
+        Text "Maya Okafor" (7X-0) 96×16 "Maya Okafor"
+        Text "Downloading now! I'l…" (7Y-0) 512×16 "Downloading now! I'll run it against both of my accounts fir"
+        Text "Oct 10" (7Z-0) 36×16 "Oct 10"
+      Frame "Message / Expanded" (81-0) 708×512
+        Frame "Frame" (82-0) 708×37
+          Frame "Frame" (83-0) 36×36
+            ... 1 children
+          Frame "Frame" (85-0) 535×37
+            ... 2 children
+          Frame "Frame" (8D-0) 113×18
+            ... 2 children
+        Frame "Message Body" (8I-0) 700×316
+          Text "Hi Arham," (8J-0) 652×22 "Hi Arham,"
+          Text "Went through the new…" (8K-0) 652×44 "Went through the new import flow twice this morning, once wi"
+          Frame "Frame" (8L-0) 652×128
+            ... 4 children
+          Text "Otherwise it already…" (8W-0) 652×44 "Otherwise it already feels like the calmest mail app I've us"
+          Frame "Frame" (8X-0) 652×22
+            ... 1 children
+        Frame "Attachment" (8Z-0) 708×44
+          Frame "Frame" (90-0) 184×44
+            ... 2 children
+        Frame "Reply Actions" (97-0) 708×40
+          Frame "Frame" (98-0) 95×30
+            ... 3 children
+          Frame "Frame" (9F-0) 114×30
+            ... 3 children
+          Frame "Frame" (9N-0) 111×30
+            ... 3 children
+  Frame "Profile Menu (open state — hidden)" (9V-0) ?×?
+    Frame "Frame" (9W-0) ?×?
+      Frame "Frame" (9X-0) ?×?
+        Text "A" (9Y-0) ?×? "A"
+      Frame "Frame" (9Z-0) ?×?
+        Text "Arham" (A0-0) ?×? "Arham"
+        Text "2 accounts connected" (A1-0) ?×? "2 accounts connected"
+    Rectangle "Rectangle" (A2-0) ?×?
+    Frame "Frame" (A3-0) ?×?
+      Frame "Frame" (A4-0) ?×?
+        SVG "SVG" (A5-0) ?×?
+          SVGVisualElement "Path" (A6-0) ?×?
+          SVGVisualElement "Path" (A7-0) ?×?
+          SVGVisualElement "Path" (A8-0) ?×?
+          SVGVisualElement "Path" (A9-0) ?×?
+          SVGVisualElement "Path" (AA-0) ?×?
+          SVGVisualElement "Path" (AB-0) ?×?
+          SVGVisualElement "Path" (AC-0) ?×?
+          SVGVisualElement "Path" (AD-0) ?×?
+          SVGVisualElement "Path" (AE-0) ?×?
+        Text "Settings" (AF-0) ?×? "Settings"
+        Text "⌘," (AG-0) ?×? "⌘,"
+      Frame "Frame" (AH-0) ?×?
+        SVG "SVG" (AI-0) ?×?
+          SVGVisualElement "Path" (AJ-0) ?×?
+          SVGVisualElement "Path" (AK-0) ?×?
+        Text "Connections" (AL-0) ?×? "Connections"
+      Frame "Frame" (AM-0) ?×?
+        SVG "SVG" (AN-0) ?×?
+          SVGVisualElement "Circle" (AO-0) ?×?
+          SVGVisualElement "Path" (AP-0) ?×?
+          SVGVisualElement "Path" (AQ-0) ?×?
+        Text "MCP & API Keys" (AR-0) ?×? "MCP & API Keys"
+      Frame "Frame" (AS-0) ?×?
+        SVG "SVG" (AT-0) ?×?
+          SVGVisualElement "Circle" (AU-0) ?×?
+          SVGVisualElement "Path" (AV-0) ?×?
+        Text "Appearance" (AW-0) ?×? "Appearance"
+        Text "Light" (AX-0) ?×? "Light"
+        SVG "SVG" (AY-0) ?×?
+          SVGVisualElement "Path" (AZ-0) ?×?
+    Rectangle "Rectangle" (B0-0) ?×?
+    Frame "Frame" (B1-0) ?×?
+      Frame "Frame" (B2-0) ?×?
+        SVG "SVG" (B3-0) ?×?
+          SVGVisualElement "Path" (B4-0) ?×?
+          SVGVisualElement "Polyline" (B5-0) ?×?
+          SVGVisualElement "Path" (B6-0) ?×?
+        Text "Sign out" (B7-0) ?×? "Sign out"
