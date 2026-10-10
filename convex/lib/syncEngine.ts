@@ -76,6 +76,7 @@ class FolderState {
   status?: FolderStatus;
   oldestUid?: number;
   backfillDone: boolean;
+  lastFlagsFullAt?: number;
 
   constructor(doc: StoredFolder) {
     this.doc = doc;
@@ -87,6 +88,7 @@ class FolderState {
     }
     this.oldestUid = doc.oldestUid;
     this.backfillDone = doc.backfillDone;
+    this.lastFlagsFullAt = doc.lastFlagsFullAt;
   }
 
   addSynced(uid: number, mask: number) {
@@ -127,6 +129,7 @@ class FolderState {
         .join(""),
       oldestUid: this.oldestUid,
       backfillDone: this.backfillDone,
+      lastFlagsFullAt: this.lastFlagsFullAt,
     };
     if (this.status) {
       p.uidValidity = this.status.uidValidity;
@@ -244,6 +247,10 @@ export async function runAccountSync(deps: EngineDeps): Promise<SyncOutcome> {
       const metas = await collectMeta(imap, folder.path, uids);
       for (const meta of metas) newRefs.push({ folder, meta });
       fs.backfillDone = range ? range[0] === 1 : true;
+      // The initial window fetches flags for every synced UID, which is a
+      // full flag pass: stamp it so the next incremental sync does not
+      // immediately redo one.
+      fs.lastFlagsFullAt = deps.now();
       folderPatches.set(folder._id, fs.patch());
       outcome.changed = true;
       continue;
@@ -284,21 +291,68 @@ export async function runAccountSync(deps: EngineDeps): Promise<SyncOutcome> {
         plan.flagMode === "condstore" ? plan.flagsSinceModseq : undefined,
       );
       flagUpdates.push(...updates.map((u) => ({ folderId: folder._id, ...u })));
-      if (plan.flagMode === "full") {
-        fs.status = { ...status };
-        // mark full pass time via patch below
-        folderPatches.set(folder._id, {
-          ...fs.patch(),
-          lastFlagsFullAt: deps.now(),
-        });
-      }
+      // Advance the stored STATUS fields (highestModseq in particular) so a
+      // flag pass with no local diffs is not repeated on every later run.
+      if (plan.flagMode === "full") fs.lastFlagsFullAt = deps.now();
+      folderPatches.set(folder._id, fs.patch());
       if (updates.length > 0) {
         outcome.flagChanges += updates.length;
         outcome.changed = true;
       }
     }
-    if (outcome.changed || plan.fetchFromUid !== null) {
+    if (
+      outcome.changed ||
+      plan.fetchFromUid !== null ||
+      (plan.detectVanished && !folderPatches.has(folder._id))
+    ) {
       folderPatches.set(folder._id, fs.patch());
+    }
+  }
+
+  // An external client may create folders between discovery runs (for
+  // example moving mail to a new "Archive"). When messages vanished,
+  // re-list the server so relocated mail is reconciled instead of deleted.
+  if (vanished.length > 0) {
+    const knownPaths = new Set(folders.map((f) => f.path));
+    const takenRoles = new Set(folders.map((f) => f.role));
+    const listed = await imap.listMailboxes();
+    const extra = listed.filter((m) => {
+      if (m.noSelect || knownPaths.has(m.path)) return false;
+      const role = roleForMailbox(m);
+      // Folders are keyed by role; a second mailbox for a taken role cannot
+      // be represented without clobbering the existing row.
+      return role !== null && !takenRoles.has(role);
+    });
+    for (const m of extra) {
+      await store.upsertFolder({
+        path: m.path,
+        role: roleForMailbox(m)!,
+        delimiter: m.delimiter,
+      });
+    }
+    if (extra.length > 0) {
+      const reloaded = await store.getAccountState();
+      folders = reloaded ? reloaded.folders : folders;
+      for (const folder of folders) {
+        if (!extra.some((m) => m.path === folder.path)) continue;
+        const status = await imap.status(folder.path);
+        if (!status) continue;
+        const fs = new FolderState(folder);
+        fs.status = status;
+        const plan = planFolderSync(folder, status, caps, deps.now());
+        const range =
+          plan.kind === "initial"
+            ? initialWindowRange(status.uidNext, plan.window)
+            : null;
+        const uids = range ? seqRange(range[0], range[1]) : [];
+        const metas = await collectMeta(imap, folder.path, uids);
+        for (const meta of metas) newRefs.push({ folder, meta });
+        fs.backfillDone = range ? range[0] === 1 : true;
+        fs.lastFlagsFullAt = deps.now();
+        folderStates.set(folder._id, fs);
+        folderPatches.set(folder._id, fs.patch());
+        outcome.changed = true;
+      }
     }
   }
 
@@ -339,6 +393,23 @@ export async function runAccountSync(deps: EngineDeps): Promise<SyncOutcome> {
         uid: r.uid,
       })),
     );
+    // Register the relocated UID in the target folder's syncedUids with the
+    // flags captured from its fetched meta. Relocated metas never reach the
+    // ingest loop, so without this the UID stays unsynced and ops cannot
+    // resolve the message's remote location.
+    const metaByKey = new Map<string, FetchedMeta>();
+    for (const n of newRefs) metaByKey.set(`${n.folder._id}:${n.meta.uid}`, n.meta);
+    for (const r of reconciled.relocations) {
+      const meta = metaByKey.get(`${r.folderId}:${r.uid}`);
+      const fs =
+        folderStates.get(r.folderId) ??
+        new FolderState(
+          folders.find((f) => f._id === r.folderId)!,
+        );
+      if (meta) fs.addSynced(meta.uid, flagMask(meta.flags));
+      folderStates.set(r.folderId, fs);
+      folderPatches.set(r.folderId, fs.patch());
+    }
     outcome.changed = true;
   }
   if (reconciled.deletions.length > 0) {
@@ -824,7 +895,14 @@ async function syncRemoteDrafts(
     ) {
       continue;
     }
-    if (!serverByUid.has(draft.remoteUid) && !draft.remoteDirty) {
+    // A draft APPENDed concurrently (pushDraftNow does not take the sync
+    // lease) can have remoteUid set before this folder's scan has seen it;
+    // only treat it as gone once the uid is inside the synced window.
+    if (
+      !serverByUid.has(draft.remoteUid) &&
+      !draft.remoteDirty &&
+      draft.remoteUid < (draftsFolder.uidNext ?? 0)
+    ) {
       await deps.store.deleteDraft(draft._id);
       outcome.changed = true;
     }
@@ -870,6 +948,29 @@ async function executeOp(
 ) {
   const { imap, store } = deps;
 
+  const state = await store.getAccountState();
+  // The doc's folder reflects the desired state the moment a move op is
+  // enqueued (mutations patch it optimistically), so the true remote
+  // location is resolved from the folders' syncedUids instead.
+  const syncedByPath = new Map<string, Set<number>>();
+  for (const f of state?.folders ?? []) {
+    syncedByPath.set(f.path, new Set([...iter(parseUidSet(f.syncedUids))]));
+  }
+  const remotePathFor = (uid: number): string | undefined => {
+    for (const [path, uids] of syncedByPath) {
+      if (uids.has(uid)) return path;
+    }
+    return undefined;
+  };
+  // UIDs are per-mailbox: the same number can live in several syncedUids
+  // sets. Prefer the folder the op was enqueued against while the uid is
+  // still tracked there; only scan all folders (e.g. after an external
+  // move) when the declared folder no longer holds it.
+  const sourcePathFor = (declared: string | undefined, uid: number): string | undefined => {
+    if (declared && syncedByPath.get(declared)?.has(uid)) return declared;
+    return remotePathFor(uid) ?? declared;
+  };
+
   if (op.kind === "flags") {
     const updates: {
       folderPath: string;
@@ -887,10 +988,12 @@ async function executeOp(
       const r = resolved[i];
       const u = updates[i];
       if (!r) continue;
+      const path = sourcePathFor(u.folderPath, r.uid);
+      if (!path) continue;
       const key =
-        r.path + "|" + JSON.stringify(u.add) + "|" + JSON.stringify(u.remove);
+        path + "|" + JSON.stringify(u.add) + "|" + JSON.stringify(u.remove);
       const g = groups.get(key) ?? {
-        path: r.path,
+        path,
         uids: [] as number[],
         add: u.add,
         remove: u.remove,
@@ -913,12 +1016,10 @@ async function executeOp(
       messageId?: string;
     }[] = op.payload.moves ?? [];
     const resolved = await resolveOpTargets(store, moves);
-    const state = await store.getAccountState();
     for (let i = 0; i < moves.length; i++) {
       const mv = moves[i];
       const r = resolved[i];
       if (!r) continue;
-      if (mv.targetRole === r.folderRole) continue;
       let targetPath = mv.targetPath;
       if (!targetPath) {
         const targetFolder = state?.folders.find((f) => f.role === mv.targetRole);
@@ -929,15 +1030,45 @@ async function executeOp(
         await imap.createMailbox(targetPath);
         await store.upsertFolder({ path: targetPath, role: mv.targetRole });
       }
+      const sourcePath = sourcePathFor(mv.folderPath, r.uid);
+      if (
+        sourcePath === undefined ||
+        sourcePath === targetPath ||
+        (syncedByPath.get(targetPath)?.has(r.uid) &&
+          !syncedByPath.get(sourcePath)?.has(r.uid))
+      ) {
+        // The remote move already happened (or a retry); keep local state
+        // consistent without issuing another MOVE.
+        if (mv.messageId) {
+          await applyMoveResult(
+            store,
+            state,
+            mv,
+            undefined,
+            r,
+            targetPath,
+            undefined,
+          );
+        }
+        continue;
+      }
       const uidMap = await imap.moveOrCopy(
-        r.path,
+        sourcePath,
         [r.uid],
         targetPath,
         caps.move,
       );
       const newUid = uidMap.get(r.uid);
       if (mv.messageId) {
-        await applyMoveResult(store, state, mv, r, targetPath, newUid);
+        await applyMoveResult(
+          store,
+          state,
+          mv,
+          sourcePath,
+          r,
+          targetPath,
+          newUid,
+        );
       }
     }
     return;
@@ -948,11 +1079,14 @@ async function executeOp(
       op.payload.expunges ?? [];
     const resolved = await resolveOpTargets(store, expunges);
     const byPath = new Map<string, number[]>();
-    for (const r of resolved) {
+    for (let i = 0; i < expunges.length; i++) {
+      const r = resolved[i];
       if (!r) continue;
-      const list = byPath.get(r.path) ?? [];
+      const path = sourcePathFor(expunges[i].folderPath, r.uid);
+      if (!path) continue;
+      const list = byPath.get(path) ?? [];
       list.push(r.uid);
-      byPath.set(r.path, list);
+      byPath.set(path, list);
     }
     for (const [path, uids] of byPath) {
       await imap.expunge(path, uids, caps.uidplus);
@@ -1032,6 +1166,7 @@ async function applyMoveResult(
   store: StorePort,
   state: { folders: StoredFolder[] } | null,
   mv: { targetRole: FolderRole; messageId?: string },
+  sourcePath: string | undefined,
   r: ResolvedTarget,
   targetPath: string,
   newUid: number | undefined,
@@ -1039,7 +1174,9 @@ async function applyMoveResult(
   if (!mv.messageId) return;
   const target = state?.folders.find((f) => f.path === targetPath);
   if (!target) return;
-  const source = state?.folders.find((f) => f.path === r.path);
+  const source = sourcePath
+    ? state?.folders.find((f) => f.path === sourcePath)
+    : undefined;
   const folderPatches: { folderId: string; patch: FolderPatch }[] = [];
 
   let mask = 0;

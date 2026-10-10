@@ -243,6 +243,7 @@ export function noulValue(
 const GENUINE_REPLY_MIN = 0.6;
 const AUTOMATED_REPLY_MAX = 0.5;
 const NEEDS_ATTENTION_MIN = 0.75;
+const ATTENTION_OTHER_MAX = 0.5;
 const OTHER_MIN = 0.6;
 
 export function decideInbox(
@@ -262,7 +263,12 @@ export function decideInbox(
   ) {
     return "primary";
   }
-  if (needsAttention !== undefined && needsAttention >= NEEDS_ATTENTION_MIN) {
+  if (
+    needsAttention !== undefined &&
+    needsAttention >= NEEDS_ATTENTION_MIN &&
+    (bulk === undefined || bulk < ATTENTION_OTHER_MAX) &&
+    (coldOutreach === undefined || coldOutreach < ATTENTION_OTHER_MAX)
+  ) {
     return "primary";
   }
   if (

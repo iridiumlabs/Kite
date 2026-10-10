@@ -94,14 +94,15 @@ export const syncAccount = internalAction({
         });
         const deps = makeEngineDeps(ctx, args.accountId, imap);
         const outcome = await runAccountSync(deps);
+        // lastSyncedAt/initialSyncDone are owned by the engine: it writes
+        // them only when the run changed something or the timestamp is
+        // stale, so an unchanged sync produces zero account writes.
         await ctx.runMutation(internal.syncStore.updateAccountSync, {
           accountId: args.accountId,
           status: "ready",
           lastError: null,
           nextSyncAfter: null,
           syncFailCount: 0,
-          lastSyncedAt: Date.now(),
-          initialSyncDone: true,
         });
         return { synced: true, ...outcome };
       } finally {

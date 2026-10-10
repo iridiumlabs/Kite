@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "../../convex/schema";
-import { internal } from "../../convex/_generated/api";
+import { internal, api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import {
   normalizeMessageId,
@@ -100,12 +100,19 @@ const normFlag = (f: string) => f.replace(/^\\/, "").toLowerCase();
 class FakeMailbox {
   uidValidity = 1;
   uidNext = 1;
+  // Real servers bump HIGHESTMODSEQ on any mailbox change, including flag
+  // stores - the counter models that so CONDSTORE paths are exercised.
+  modseq = 0;
   messages = new Map<number, ServerMessage>();
 
   constructor(
     public path: string,
     public specialUse?: string,
   ) {}
+
+  bump() {
+    this.modseq++;
+  }
 
   append(source: string, flags: string[] = [], date?: number): number {
     const uid = this.uidNext++;
@@ -115,6 +122,7 @@ class FakeMailbox {
       source,
       date: date ?? Date.now(),
     });
+    this.bump();
     return uid;
   }
 
@@ -169,7 +177,7 @@ class FakeImap implements ImapPort {
     return {
       uidValidity: box.uidValidity,
       uidNext: box.uidNext,
-      highestModseq: String(box.uidNext * 100 + box.messages.size),
+      highestModseq: String(box.modseq),
       messages: box.messages.size,
       unseen: box.unseen(),
     };
@@ -246,7 +254,10 @@ class FakeImap implements ImapPort {
     }
   }
 
+  fetchFlagsCalls = 0;
+
   async *fetchFlags(path: string) {
+    this.fetchFlagsCalls++;
     const box = this.boxes.get(path);
     if (!box) return;
     for (const m of box.messages.values()) {
@@ -284,6 +295,7 @@ class FakeImap implements ImapPort {
       if (!m) continue;
       for (const f of add) m.flags.add(normFlag(f));
       for (const f of remove) m.flags.delete(normFlag(f));
+      box.bump();
     }
   }
 
@@ -301,11 +313,13 @@ class FakeImap implements ImapPort {
       if (!m) continue;
       const newUid = dst.uidNext++;
       dst.messages.set(newUid, { ...m, uid: newUid });
+      dst.bump();
       map.set(uid, newUid);
       // MOVE deletes the source; the COPY fallback in FlowPort does
       // COPY + delete, so both paths remove the original.
       void canMove;
       src!.messages.delete(uid);
+      src!.bump();
     }
     return map;
   }
@@ -313,7 +327,9 @@ class FakeImap implements ImapPort {
   async expunge(path: string, uids: number[]) {
     const box = this.boxes.get(path);
     if (!box) return;
-    for (const uid of uids) box.messages.delete(uid);
+    for (const uid of uids) {
+      if (box.messages.delete(uid)) box.bump();
+    }
   }
 
   async append(path: string, source: Uint8Array | string, flags: string[]) {
@@ -337,19 +353,24 @@ class FakeImap implements ImapPort {
     if (!m) throw new Error("no such uid");
     const newUid = dst.uidNext++;
     dst.messages.set(newUid, { ...m, uid: newUid });
+    dst.bump();
     srcBox.messages.delete(uid);
+    srcBox.bump();
     return newUid;
   }
 
   serverDelete(path: string, uid: number) {
-    this.mailbox(path).messages.delete(uid);
+    const box = this.mailbox(path);
+    if (box.messages.delete(uid)) box.bump();
   }
 
   serverSetFlags(path: string, uid: number, add: string[], remove: string[]) {
-    const m = this.mailbox(path).messages.get(uid);
+    const box = this.mailbox(path);
+    const m = box.messages.get(uid);
     if (!m) throw new Error("no such uid");
     for (const f of add) m.flags.add(normFlag(f));
     for (const f of remove) m.flags.delete(normFlag(f));
+    box.bump();
   }
 
   // Simulates a server dropping UID validity and renumbering.
@@ -441,7 +462,7 @@ async function world(opts?: { caps?: Partial<SyncCapabilities> }) {
     parser,
     classify,
     now: () => now.t,
-    log: () => {},
+    log: process.env.E2E_DEBUG ? console.log : () => {},
   };
   classifyCalls.length = 0;
   return { t, accountId, imap, deps, now };
@@ -518,10 +539,77 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     const { t, imap, deps } = await world();
     imap.mailbox("INBOX").append(mailSource({ id: "a@t" }), ["\\Seen"]);
     await runAccountSync(deps);
+
+    // Regression: an unchanged sync must produce zero document writes.
+    // The initial ingest already captured full flags (stamping
+    // lastFlagsFullAt), so no follow-up flag pass or account/folder patch
+    // should run at all.
+    const writes: string[] = [];
+    for (const name of [
+      "ingestBatch",
+      "patchFolderState",
+      "applyFlagChanges",
+      "relocateMessages",
+      "deleteMessages",
+      "applyMoveResults",
+      "updateAccount",
+      "upsertFolder",
+      "markDiscovery",
+    ] as const) {
+      const orig = deps.store[name].bind(deps.store) as (
+        ...a: unknown[]
+      ) => Promise<unknown>;
+      (deps.store as unknown as Record<string, unknown>)[name] = (
+        ...a: unknown[]
+      ) => {
+        writes.push(`${name}(${JSON.stringify(a[0]).slice(0, 120)})`);
+        return orig(...a);
+      };
+    }
+
     const second = await runAccountSync(deps);
     expect(second.newMessages).toBe(0);
     expect(second.vanished).toBe(0);
     expect(await allMessages(t)).toHaveLength(1);
+    expect(writes).toEqual([]);
+  });
+
+  test("a CONDSTORE flag pass with no local diff still advances stored modseq", async () => {
+    const { t, accountId, imap, deps } = await world({
+      caps: { condstore: true },
+    });
+    const uid = imap.mailbox("INBOX").append(mailSource({ id: "a@t" }), []);
+    await runAccountSync(deps);
+    const inbox = await folderByRole(t, accountId, "inbox");
+
+    // Another client flags the message; a pending op (or optimistic write)
+    // has already applied the same flag locally, so the flag pass finds no
+    // doc-level diff. The stored highestModseq must still advance or every
+    // later sync would repeat the CONDSTORE fetch.
+    imap.serverSetFlags("INBOX", uid, ["\\Seen"], []);
+    await t.run(async (ctx) => {
+      const folder = await ctx.db.get(inbox._id);
+      const m = await ctx.db
+        .query("messages")
+        .withIndex("by_folder_uid", (q) =>
+          q.eq("folderId", inbox._id).eq("uid", uid),
+        )
+        .first();
+      await ctx.db.patch(m!._id, { seen: true });
+      await ctx.db.patch(inbox._id, { flags: "1" });
+      void folder;
+    });
+
+    const before = imap.fetchFlagsCalls;
+    await runAccountSync(deps);
+    const mid = await folderByRole(t, accountId, "inbox");
+    const serverModseq = String(imap.mailbox("INBOX").modseq);
+    expect(mid.highestModseq).toBe(serverModseq);
+    expect(mid.unseen).toBe(0);
+
+    // The follow-up run must not refetch flags at all.
+    await runAccountSync(deps);
+    expect(imap.fetchFlagsCalls).toBe(before + 1);
   });
 
   test("new mail arrival is ingested on the next sync", async () => {
@@ -588,8 +676,80 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
 
     const archive = await folderByRole(t, accountId, "archive");
     expect(moved.folderId).toBe(archive._id);
+    // The relocated UID must be registered as synced in the target folder;
+    // otherwise pending ops cannot resolve its remote location.
+    expect(archive.syncedUids).toBe(String(newUid));
     const thread = await threadById(t, moved.threadId);
     expect(thread.location).toBe("archive");
+  });
+
+  test("trash op after an external move really moves on the server", async () => {
+    // Regression: a relocated UID that never landed in the target folder's
+    // syncedUids made remotePathFor fall back to the optimistic folderPath
+    // (the target itself), so the move op was skipped as already done.
+    const { t, accountId, imap, deps, now } = await world();
+    const uid = imap
+      .mailbox("INBOX")
+      .append(mailSource({ id: "tr@t", subject: "promo newsletter offer" }));
+    await runAccountSync(deps);
+    imap.serverMove("INBOX", uid, "Archive");
+    await runAccountSync(deps);
+    const doc = (await allMessages(t))[0];
+    expect(doc.folderRole).toBe("archive");
+
+    await t
+      .withIdentity({ subject: USER })
+      .mutation(api.mail.trash, { messageIds: [doc._id] });
+    now.t = Date.now(); // ops enqueue with real-time nextAttemptAt
+    const outcome = await runAccountSync(deps);
+    expect(outcome.opsProcessed).toBe(1);
+    expect(imap.mailbox("Archive").messages.size).toBe(0);
+    expect(imap.mailbox("Trash").messages.size).toBe(1);
+    expect(doc.uid !== undefined).toBe(true);
+    const trashed = (await allMessages(t))[0];
+    expect(trashed.folderRole).toBe("trash");
+    const trash = await folderByRole(t, accountId, "trash");
+    expect(trash.syncedUids).toBe(String(trashed.uid));
+  });
+
+  test("external move to a folder created after discovery relocates", async () => {
+    const { t, accountId, imap, deps } = await world();
+    const uid = imap
+      .mailbox("INBOX")
+      .append(mailSource({ id: "mv2@t", subject: "promo newsletter offer" }));
+    await runAccountSync(deps);
+    const before = (await allMessages(t))[0];
+    expect(before.folderRole).toBe("inbox");
+
+    // Folder roles are unique per account; drop the pre-seeded Archive so
+    // the externally created folder can take the role (as on Ethereal).
+    imap.boxes.delete("Archive");
+    await t.run(async (ctx) => {
+      const rows = await ctx.db
+        .query("folders")
+        .withIndex("by_account_role", (q) =>
+          q.eq("accountId", accountId).eq("role", "archive"),
+        )
+        .collect();
+      for (const r of rows) await ctx.db.delete(r._id);
+      return rows.length;
+    });
+
+    // Another client creates a brand-new folder and moves the message there
+    // between discovery runs; the sync must still find it.
+    const newUid = imap.serverMove("INBOX", uid, "Archives");
+    await runAccountSync(deps);
+
+    const msgs = await allMessages(t);
+    expect(msgs).toHaveLength(1);
+    const moved = msgs[0];
+    expect(moved._id).toBe(before._id);
+    expect(moved.uid).toBe(newUid);
+    expect(moved.inbox).toBe("other");
+    const folders = await allFolders(t);
+    const target = folders.find((f) => f.path === "Archives")!;
+    expect(target.role).toBe("archive");
+    expect(moved.folderId).toBe(target._id);
   });
 
   test("external deletion removes the doc and its thread", async () => {
@@ -678,6 +838,97 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     expect(
       await t.run((ctx) => ctx.db.query("pendingOps").collect()),
     ).toHaveLength(0);
+  });
+
+  test("archive via the public mutation really moves on the server", async () => {
+    // Regression: mail.archive patches folderRole optimistically; the move
+    // op must resolve the remote location from folder state, not the doc.
+    const { t, imap, deps, now } = await world({ caps: { move: true } });
+    imap
+      .mailbox("INBOX")
+      .append(mailSource({ id: "op2@t" }), ["\\Seen"]);
+    await runAccountSync(deps);
+    const doc = (await allMessages(t))[0];
+
+    await t
+      .withIdentity({ subject: USER })
+      .mutation(api.mail.archive, { messageIds: [doc._id] });
+
+    // Doc is already patched to the target role before the op runs.
+    const optimistic = (await allMessages(t))[0];
+    expect(optimistic.folderRole).toBe("archive");
+
+    now.t = Date.now(); // ops enqueue with real-time nextAttemptAt
+    const outcome = await runAccountSync(deps);
+    expect(outcome.opsProcessed).toBe(1);
+    expect(imap.mailbox("INBOX").messages.size).toBe(0);
+    expect(
+      [...imap.mailbox("Archive").messages.keys()].length,
+    ).toBe(1);
+
+    const after = (await allMessages(t))[0];
+    expect(after.folderRole).toBe("archive");
+    const next = await runAccountSync(deps);
+    expect(next.vanished).toBe(0);
+    expect(next.newMessages).toBe(0);
+  });
+
+  test("archive op still runs when the target folder already holds the same uid number", async () => {
+    // Regression: UIDs are per-mailbox. When Archive already tracks uid 1,
+    // archiving INBOX's uid 1 used to be skipped as "already moved" because
+    // remotePathFor matched the wrong mailbox's syncedUids.
+    const { t, accountId, imap, deps, now } = await world({
+      caps: { move: true },
+    });
+    const uid = imap
+      .mailbox("INBOX")
+      .append(mailSource({ id: "col@t", subject: "collide me" }), ["\\Seen"]);
+    imap
+      .mailbox("Archive")
+      .append(mailSource({ id: "other@t", subject: "already there" }));
+    await runAccountSync(deps);
+    const archive0 = await folderByRole(t, accountId, "archive");
+    expect(archive0.syncedUids).toBe("1");
+
+    const doc = (await allMessages(t)).find((m) => m.subject === "collide me")!;
+    expect(doc.uid).toBe(uid);
+    await t
+      .withIdentity({ subject: USER })
+      .mutation(api.mail.archive, { messageIds: [doc._id] });
+    now.t = Date.now();
+    const outcome = await runAccountSync(deps);
+    expect(outcome.opsProcessed).toBe(1);
+    expect(imap.mailbox("INBOX").messages.size).toBe(0);
+    expect(imap.mailbox("Archive").messages.size).toBe(2);
+    const after = (await allMessages(t)).find(
+      (m) => m.subject === "collide me",
+    )!;
+    expect(after.folderRole).toBe("archive");
+    const archive1 = await folderByRole(t, accountId, "archive");
+    expect(archive1.syncedUids).toContain(String(after.uid));
+  });
+
+  test("flags op runs against the uid's real remote folder", async () => {
+    // Regression: with a move op queued first, the doc folder is already
+    // the target when the flags op executes; STORE must hit the folder
+    // where the uid actually lives on the server.
+    const { t, imap, deps, now } = await world({ caps: { move: true } });
+    imap.mailbox("INBOX").append(mailSource({ id: "fl@t" }), ["\\Seen"]);
+    await runAccountSync(deps);
+    const doc = (await allMessages(t))[0];
+
+    await t
+      .withIdentity({ subject: USER })
+      .mutation(api.mail.archive, { messageIds: [doc._id] });
+    await t
+      .withIdentity({ subject: USER })
+      .mutation(api.mail.setRead, { messageIds: [doc._id], read: false });
+
+    now.t = Date.now(); // ops enqueue with real-time nextAttemptAt
+    await runAccountSync(deps);
+
+    const archMsg = [...imap.mailbox("Archive").messages.values()][0];
+    expect(archMsg.flags.has("\\Seen")).toBe(false);
   });
 
   test("a local Sent placeholder is upgraded, not duplicated, by sync", async () => {

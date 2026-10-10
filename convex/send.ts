@@ -191,6 +191,17 @@ export const completeSend = internalMutation({
             await ctx.storage.delete(att.storageId).catch(() => {});
           }
         }
+        if (draft.remoteUid !== undefined && draft.remoteFolderId) {
+          const folder = await ctx.db.get(draft.remoteFolderId);
+          if (folder) {
+            await enqueueOp(ctx, {
+              userId: draft.userId,
+              accountId: draft.accountId,
+              kind: "deleteRemoteDraft",
+              payload: { folderPath: folder.path, uid: draft.remoteUid },
+            });
+          }
+        }
         await ctx.db.delete(args.draftId);
         const counter = await ctx.db
           .query("counters")

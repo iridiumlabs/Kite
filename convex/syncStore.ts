@@ -710,10 +710,17 @@ export const updateAccountSync = internalMutation({
   },
   handler: async (ctx, args) => {
     const { accountId, ...rest } = args;
+    const current = await ctx.db.get(accountId);
+    if (!current) return;
+    const currentRec = current as unknown as Record<string, unknown>;
     const patch: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(rest)) {
       if (val === undefined) continue;
-      patch[k] = val === null ? undefined : val;
+      const next = val === null ? undefined : val;
+      if (JSON.stringify(currentRec[k] ?? null) === JSON.stringify(next ?? null)) {
+        continue;
+      }
+      patch[k] = next;
     }
     if (Object.keys(patch).length > 0) {
       await ctx.db.patch(accountId, patch);

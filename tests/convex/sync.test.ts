@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { api, internal } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { makeT, seedAccount, seedFolder, type T } from "./testUtil";
 
 const USER = "user_sync";
@@ -160,6 +161,96 @@ describe("sendLog dedupe", () => {
       allowDuplicate: true,
     });
     expect("sendLogId" in second).toBe(true);
+  });
+});
+
+describe("completeSend draft cleanup", () => {
+  test("sending a draft queues deleteRemoteDraft for its remote copy", async () => {
+    const t = makeT();
+    const { accountId } = await setup(t);
+    const draftsFolderId = await seedFolder(t, USER, accountId, "drafts", "Drafts");
+    const draftId = await t.run((ctx) =>
+      ctx.db.insert("drafts", {
+        userId: USER,
+        accountId,
+        mode: "new",
+        to: [{ email: "a@x.com" }],
+        cc: [],
+        bcc: [],
+        subject: "send me",
+        html: "<p>hi</p>",
+        text: "hi",
+        attachments: [],
+        messageIdHeader: "draft-1@x",
+        status: "editing",
+        remoteFolderId: draftsFolderId,
+        remoteUid: 7,
+        remoteDirty: false,
+        updatedAt: Date.now(),
+        createdAt: Date.now(),
+      }),
+    );
+    const begun = await t.mutation(internal.send.beginSend, {
+      userId: USER,
+      accountId,
+      contentHash: "hash-draft",
+      messageIdHeader: "sent-1@x",
+    });
+    const sendLogId = (begun as { sendLogId: Id<"sendLog"> }).sendLogId;
+    await t.mutation(internal.send.completeSend, {
+      sendLogId,
+      accountId,
+      draftId,
+      messageIdHeader: "sent-1@x",
+      references: [],
+      subject: "send me",
+      from: { email: "me@x.com" },
+      to: [{ email: "a@x.com" }],
+      cc: [],
+      bcc: [],
+      text: "hi",
+      attachments: [],
+    });
+    expect(await t.run((ctx) => ctx.db.get(draftId))).toBeNull();
+    const ops = await t.run((ctx) => ctx.db.query("pendingOps").collect());
+    const del = ops.find((o) => o.kind === "deleteRemoteDraft");
+    expect(del).toBeDefined();
+    expect((del!.payload as { folderPath: string; uid: number }).folderPath).toBe("Drafts");
+    expect((del!.payload as { uid: number }).uid).toBe(7);
+  });
+});
+
+describe("account purge", () => {
+  test("purgeAccountBatch removes sendLog rows and the per-account counter", async () => {
+    const t = makeT();
+    const { accountId } = await setup(t);
+    const begun = await t.mutation(internal.send.beginSend, {
+      userId: USER,
+      accountId,
+      contentHash: "hash-p",
+      messageIdHeader: "s1@x.com",
+    });
+    expect("sendLogId" in begun).toBe(true);
+    await t.run((ctx) =>
+      ctx.db.insert("counters", {
+        userId: USER,
+        key: `unread:acct:${accountId}`,
+        count: 0,
+      }),
+    );
+    await t.mutation(internal.accounts.purgeAccountBatch, {
+      userId: USER,
+      accountId,
+    });
+    expect(
+      await t.run((ctx) => ctx.db.query("sendLog").collect()),
+    ).toHaveLength(0);
+    const counters = await t.run((ctx) =>
+      ctx.db.query("counters").collect(),
+    );
+    expect(
+      counters.filter((c) => c.key === `unread:acct:${accountId}`),
+    ).toHaveLength(0);
   });
 });
 

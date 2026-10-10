@@ -114,13 +114,31 @@ export const purgeAccountBatch = internalMutation({
       .withIndex("by_account_next", (q) => q.eq("accountId", args.accountId))
       .take(ROW_BATCH);
     for (const op of ops) await ctx.db.delete(op._id);
-    if (drafts.length === ROW_BATCH || ops.length === ROW_BATCH) {
+    const sendLogs = (await ctx.db.query("sendLog").collect())
+      .filter((row) => row.accountId === args.accountId)
+      .slice(0, ROW_BATCH);
+    for (const row of sendLogs) await ctx.db.delete(row._id);
+    if (
+      drafts.length === ROW_BATCH ||
+      ops.length === ROW_BATCH ||
+      sendLogs.length === ROW_BATCH
+    ) {
       await ctx.scheduler.runAfter(
         0,
         internal.accounts.purgeAccountBatch,
         args,
       );
+      return;
     }
+    const accountCounter = await ctx.db
+      .query("counters")
+      .withIndex("by_user_key", (q) =>
+        q
+          .eq("userId", args.userId)
+          .eq("key", `unread:acct:${args.accountId}`),
+      )
+      .first();
+    if (accountCounter) await ctx.db.delete(accountCounter._id);
   },
 });
 
@@ -270,10 +288,10 @@ export const connect = action({
 
     const imapHost = args.imapHost ?? DEFAULT_IMAP_HOST;
     const imapPort = args.imapPort ?? 993;
-    const imapSecure = args.imapSecure ?? true;
+    const imapSecure = args.imapSecure ?? imapPort === 993;
     const smtpHost = args.smtpHost ?? DEFAULT_SMTP_HOST;
     const smtpPort = args.smtpPort ?? 465;
-    const smtpSecure = args.smtpSecure ?? true;
+    const smtpSecure = args.smtpSecure ?? smtpPort === 465;
 
     const { capabilities }: { capabilities: AccountCapabilities } =
       await ctx.runAction(internal.node.accountsOps.testConnectionNow, {

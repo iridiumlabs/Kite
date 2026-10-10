@@ -208,6 +208,39 @@ describe("decideInbox", () => {
     ).toBe("other");
   });
 
+  test("needs_attention does not override bulk or cold outreach", () => {
+    // Marketing "act now" pressure is still bulk mail.
+    expect(
+      decideInbox(
+        answers({
+          needs_attention: { type: "noul", noul: 0.9 },
+          bulk: { type: "noul", noul: 0.8 },
+        }),
+        { folderRole: "inbox" },
+      ),
+    ).toBe("other");
+    expect(
+      decideInbox(
+        answers({
+          needs_attention: { type: "noul", noul: 0.9 },
+          cold_outreach: { type: "noul", noul: 0.8 },
+        }),
+        { folderRole: "inbox" },
+      ),
+    ).toBe("other");
+    // Borderline signals below 0.5 still allow the override.
+    expect(
+      decideInbox(
+        answers({
+          needs_attention: { type: "noul", noul: 0.9 },
+          bulk: { type: "noul", noul: 0.4 },
+          cold_outreach: { type: "noul", noul: 0.4 },
+        }),
+        { folderRole: "inbox" },
+      ),
+    ).toBe("primary");
+  });
+
   test("automated, bulk or cold outreach >= 0.6 is other", () => {
     for (const key of ["automated", "bulk", "cold_outreach"]) {
       expect(
