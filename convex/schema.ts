@@ -289,6 +289,7 @@ export default defineSchema({
       v.literal("failed"),
     ),
     sendError: v.optional(v.string()),
+    sendErrorAt: v.optional(v.number()),
     remoteFolderId: v.optional(v.id("folders")),
     remoteUid: v.optional(v.number()),
     remoteDirty: v.boolean(),
@@ -297,6 +298,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_user_updated", ["userId", "updatedAt"])
+    .index("by_user_status_updated", ["userId", "status", "updatedAt"])
     .index("by_account", ["accountId", "updatedAt"])
     .index("by_remote", ["remoteFolderId", "remoteUid"]),
 

@@ -35,6 +35,8 @@ import { VIEW_LABELS } from "@/lib/ui/types";
 import { patchThreads, removeThreads } from "@/lib/ui/optimistic";
 import { ReaderContainer } from "./ReaderContainer";
 import { ComposeLayer } from "./ComposeLayer";
+import { SendFailureNotifications } from "./SendFailureNotifications";
+import { draftSendProblem } from "@/lib/ui/draftSendProblem";
 import { SettingsHost } from "./SettingsHost";
 import { ConnectAccountDialog } from "@/components/settings/ConnectAccountDialog";
 import { CategoryDialog } from "@/components/settings/CategoryDialog";
@@ -279,7 +281,7 @@ export function MailApp() {
         participants: d.to.length
           ? d.to
           : [{ name: "No recipient", email: "" }],
-        snippet: d.text.slice(0, 120),
+        snippet: draftSendProblem(d) ?? d.text.slice(0, 120),
         lastMessageAt: d.updatedAt,
         messageCount: 1,
         unread: false,
@@ -1004,6 +1006,7 @@ export function MailApp() {
         commands={commands}
       />
 
+      <SendFailureNotifications />
       <ComposeLayer categories={categoryInfos} accounts={accountInfos} />
       <SettingsHost
         categories={categoryInfos}

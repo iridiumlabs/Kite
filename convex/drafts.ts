@@ -128,6 +128,22 @@ export const list = query({
   },
 });
 
+// Lightweight subscription across every mailbox, even outside the Drafts view.
+// Do not return bodies or attachments just to report background send failures.
+export const sendProblems = query({
+  args: apiKeyArg,
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const rows = await Promise.all((["failed", "uncertain"] as const).map(status =>
+      ctx.db.query("drafts")
+        .withIndex("by_user_status_updated", q => q.eq("userId", userId).eq("status", status))
+        .order("desc").take(20),
+    ));
+    return rows.flat().filter(d => d.status === "failed" || d.sendError)
+      .map(d => ({ draftId: d._id, status: d.status, sendError: d.sendError, subject: d.subject, updatedAt: d.sendErrorAt ?? d.updatedAt }));
+  },
+});
+
 export const get = query({
   args: { ...apiKeyArg, draftId: v.id("drafts") },
   handler: async (ctx, args) => {

@@ -1,6 +1,7 @@
 "use node";
 
 import { v } from "convex/values";
+import { isDefiniteSmtpFailure } from "../lib/smtpFailure";
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
@@ -160,10 +161,9 @@ export const performSend = internalAction({
         raw: source,
       });
     } catch (error) {
-      // An explicit SMTP 4xx/5xx response is a rejection, not an ambiguous
-      // disconnect after DATA. Transport/timeouts remain reserved as uncertain.
-      const code = (error as { responseCode?: number } | null)?.responseCode;
-      if (typeof code === "number" && code >= 400 && code < 600) {
+      // Release only proven non-delivery; generic socket errors/timeouts can
+      // hide acceptance after DATA and must keep their reservation.
+      if (isDefiniteSmtpFailure(error)) {
         await ctx.runMutation(internal.send.failSend, {
           sendLogId: args.sendLogId,
           draftId: args.draftId,

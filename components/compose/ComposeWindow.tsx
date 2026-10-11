@@ -26,6 +26,7 @@ export interface RecipientChip {
 }
 
 export interface ComposeAttachment {
+  uploadId?: string;
   filename: string;
   contentType: string;
   size: number;
@@ -53,6 +54,7 @@ export interface ComposeWindowProps {
   // body
   editor: ReactNode;
   quoted?: ReactNode;
+  sendError?: string;
   attachments: ComposeAttachment[];
   onRemoveAttachment?: (i: number) => void;
   formatBar?: ReactNode;
@@ -343,6 +345,11 @@ export function ComposeWindow(p: ComposeWindowProps) {
           <div className="grow basis-0 min-w-0">{p.subjectInput}</div>
         </div>
       </div>
+      {p.sendError && (
+        <div role="alert" className="shrink-0 border-b border-divider px-4 py-3 text-red-500 text-[13px]/5">
+          {p.sendError}
+        </div>
+      )}
       {p.formatBar}
       <div className="flex flex-col grow basis-0 min-h-0 pt-4.5 pb-4 px-4 overflow-y-auto">
         {p.editor}

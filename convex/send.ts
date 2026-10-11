@@ -244,17 +244,19 @@ export const failSend = internalMutation({
   },
   handler: async (ctx, args) => {
     const log = await ctx.db.get(args.sendLogId);
-    if (log && (log.status === "sending" || (log.status === "uncertain" && args.definiteRejection))) {
+    if (log && (log.status === "sending" || log.status === "uncertain")) {
       await ctx.db.patch(args.sendLogId, {
-        status: "failed",
+        status: log.status === "uncertain" && !args.definiteRejection ? "uncertain" : "failed",
         error: args.error.slice(0, 500),
       });
     }
     if (args.draftId) {
       const draft = await ctx.db.get(args.draftId);
-      if (draft && (draft.status === "sending" || (draft.status === "uncertain" && args.definiteRejection))) {
+      if (draft && (draft.status === "sending" || draft.status === "uncertain")) {
         await ctx.db.patch(args.draftId, {
-          status: "failed",
+          status: draft.status === "uncertain" && !args.definiteRejection ? "uncertain" : "failed",
+          updatedAt: Date.now(),
+          sendErrorAt: Date.now(),
           sendError: args.error.slice(0, 500),
         });
       }
@@ -720,7 +722,7 @@ export const claimDraftForSend = internalMutation({
     if (draft.status === "uncertain") throw new Error("Delivery is uncertain. Check Sent before sending again.");
     if (draft.to.length + draft.cc.length + draft.bcc.length === 0) throw new Error("Add at least one recipient before sending");
     if (!args.scheduledOnly && draft.scheduledJobId) await ctx.scheduler.cancel(draft.scheduledJobId).catch(() => {});
-    await ctx.db.patch(draft._id, { status: "sending", scheduledAt: undefined, scheduledJobId: undefined });
+    await ctx.db.patch(draft._id, { status: "sending", sendError: undefined, sendErrorAt: undefined, scheduledAt: undefined, scheduledJobId: undefined });
     return draft;
   },
 });
@@ -729,7 +731,7 @@ export const failClaimedDraft = internalMutation({
   args: { draftId: v.id("drafts"), error: v.string() },
   handler: async (ctx, args) => {
     const draft = await ctx.db.get(args.draftId);
-    if (draft?.status === "sending") await ctx.db.patch(draft._id, { status: "failed", sendError: args.error.slice(0, 500) });
+    if (draft?.status === "sending") await ctx.db.patch(draft._id, { status: "failed", sendError: args.error.slice(0, 500), sendErrorAt: Date.now(), updatedAt: Date.now() });
   },
 });
 

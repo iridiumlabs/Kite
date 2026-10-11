@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { composeAccount } from "@/lib/ui/composeAccount";
 import { initialComposeBody } from "@/lib/ui/composeBody";
+import { draftSendProblem } from "@/lib/ui/draftSendProblem";
 import {
   ComposeWindow,
   QuotedPreview,
@@ -340,6 +341,7 @@ function ComposePane({
     win.mode === "draft" ? (win.draftId as Id<"drafts">) : undefined,
   );
   const dirtyRef = useRef(false);
+  const discardedRef = useRef(false);
   const savingRef = useRef<Promise<Id<"drafts"> | undefined> | null>(null);
   const saveLatestRef = useRef<(() => Promise<Id<"drafts"> | undefined>) | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -426,6 +428,7 @@ function ComposePane({
       messageId: win.replyToMessageId as Id<"messages">,
     })
       .then((c) => {
+        if (discardedRef.current) return false;
         const content = c as {
           attachments?: AttachmentInfo[];
           text?: string;
@@ -469,15 +472,16 @@ function ComposePane({
 
   const save = useCallback(async (): Promise<Id<"drafts"> | undefined> => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    // Create the forward draft only after its original attachments are known.
-    // Every save/send/attachment path shares this gate, so no early autosave
-    // can permanently omit attachments that finish loading later.
+    while (savingRef.current) await savingRef.current;
+    if (discardedRef.current) return undefined;
+    const operation = async (): Promise<Id<"drafts"> | undefined> => {
+    // Track the entire save, including the forward-load wait, so discard can
+    // cancel a waiting save or delete a draft whose creation is already running.
     if (win.mode === "forward" && forwardLoadRef.current && !await forwardLoadRef.current) {
-      toast.error("Could not load forwarded attachments. Reopen the forward to try again.");
+      if (!discardedRef.current) toast.error("Could not load forwarded attachments. Reopen the forward to try again.");
       return undefined;
     }
-    while (savingRef.current) await savingRef.current;
-    const operation = async (): Promise<Id<"drafts"> | undefined> => {
+    if (discardedRef.current) return undefined;
     const acct = composeAccount(accounts, accountId, defaultAccountId)?.id as Id<"accounts"> | undefined;
     if (!acct) return undefined;
     setStatus((s) => (s === "scheduled" ? s : "saving"));
@@ -543,6 +547,7 @@ function ComposePane({
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
   const queueSave = useCallback(() => {
+    if (discardedRef.current) return;
     dirtyRef.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => void saveLatestRef.current?.(), 800);
@@ -579,15 +584,16 @@ function ComposePane({
     if (!files?.length) return;
     const id = await save();
     if (!id) {
-      toast.error("Connect an account before attaching files");
+      if (!discardedRef.current) toast.error("Connect an account before attaching files");
       return;
     }
-    let nextIndex = attachments.length;
     for (const file of Array.from(files)) {
-      const idx = nextIndex++;
+      if (discardedRef.current) return;
+      const uploadId = crypto.randomUUID();
       setAttachments((prev) => [
         ...prev,
         {
+          uploadId,
           filename: file.name,
           contentType: file.type || "application/octet-stream",
           size: file.size,
@@ -617,17 +623,20 @@ function ComposePane({
           },
         });
         setAttachments((prev) =>
-          prev.map((a, i) => (i === idx ? { ...a, uploading: false } : a)),
+          prev.map((a) => (a.uploadId === uploadId ? { ...a, uploading: false } : a)),
         );
       } catch {
-        setAttachments((prev) => prev.filter((_, i) => i !== idx));
-        nextIndex--;
+        setAttachments((prev) => prev.filter((a) => a.uploadId !== uploadId));
         toast.error(`Could not attach ${file.name}`);
       }
     }
   };
 
   const onSend = async () => {
+    if (existingDraft?.status === "uncertain" || existingDraft?.status === "sending") {
+      toast.error(draftSendProblem(existingDraft) ?? "Draft is already sending");
+      return;
+    }
     if (to.length === 0) {
       toast.error("Add a recipient first");
       return;
@@ -641,7 +650,7 @@ function ComposePane({
       return;
     }
     const id = await save();
-    if (!id) return;
+    if (!id || discardedRef.current) return;
     const delay = Math.max(undoSendSeconds, 0) * 1000;
     try {
       // Persist the send before closing. Reloading or closing this tab cannot
@@ -669,12 +678,16 @@ function ComposePane({
   };
 
   const onSchedule = async (at: number) => {
+    if (existingDraft?.status === "uncertain" || existingDraft?.status === "sending") {
+      toast.error(draftSendProblem(existingDraft) ?? "Draft is already sending");
+      return;
+    }
     if (to.length === 0) {
       toast.error("Add a recipient first");
       return;
     }
     const id = await save();
-    if (!id) return;
+    if (!id || discardedRef.current) return;
     try {
       await scheduleSend({ draftId: id, at });
       setStatus("scheduled");
@@ -689,9 +702,10 @@ function ComposePane({
   };
 
   const onDiscard = async () => {
+    discardedRef.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    while (savingRef.current) await savingRef.current;
     ui.closeCompose(win.id);
+    while (savingRef.current) await savingRef.current;
     if (draftIdRef.current) {
       try {
         await discardDraft({ draftId: draftIdRef.current });
@@ -743,6 +757,7 @@ function ComposePane({
         subject={subject}
         status={status}
         scheduledLabel={scheduledLabel}
+        sendError={draftSendProblem(existingDraft)}
         fromLabel={
           <Menu.Root>
             <Menu.Trigger className="flex items-center gap-1.5 min-w-0">
@@ -883,7 +898,7 @@ function ComposePane({
         onToggleFormat={() => setFormatOpen((v) => !v)}
         formatOpen={formatOpen}
         onDiscard={() => void onDiscard()}
-        sendDisabled={accounts.length === 0}
+        sendDisabled={accounts.length === 0 || existingDraft?.status === "uncertain" || existingDraft?.status === "sending"}
       />
       <input
         ref={fileInput}
