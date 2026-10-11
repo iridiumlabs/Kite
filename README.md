@@ -10,6 +10,8 @@ An Apple-inspired personal email client for multiple Spacemail IMAP/SMTP mailbox
 4. Set the Convex deployment environment variables listed in `.env.example`. The credentials encryption key must be a securely generated, base64-encoded 32-byte key. Keep it stable: changing it does not re-encrypt existing mailbox passwords.
 5. Configure Clerk's Convex JWT integration and `CLERK_JWT_ISSUER_DOMAIN` on the Convex deployment.
 
+Server-side mail connections are restricted to the exact Spacemail (`mail.spacemail.com`) and live-test Ethereal (`imap.ethereal.email`, `smtp.ethereal.email`) endpoints. IMAP requires TLS on port 993; SMTP uses TLS on 465 or mandatory STARTTLS on 587. Arbitrary hosts, private-network targets and other ports are rejected.
+
 `EXPERIENTIAL_API_KEY` enables Jev classification. Without it, ingest uses deterministic Primary/Other heuristics and records classification for a bounded later retry. Retry category descriptions are captured at ingest, so subsequent category edits do not retroactively categorize old mail. Manual corrections take precedence over retries.
 
 See `AGENTS.md` for the architecture, data-I/O rules and local dev-auth harness. Dev auth is test-only. Never enable `POST_DEV_AUTH`, `NEXT_PUBLIC_POST_DEV_AUTH` or `POST_DEV_AUTH_ISSUER` in production.

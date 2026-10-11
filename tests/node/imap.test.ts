@@ -10,7 +10,12 @@ vi.mock("imapflow", () => ({
   },
 }));
 import { connectImap } from "../../convex/node/imap";
-const cfg = { host: "test", port: 993, secure: true, username: "test", password: "test" };
+const cfg = { host: "mail.spacemail.com", port: 993, secure: true, username: "test", password: "test" };
+test("IMAP rejects unsupported saved destinations before opening a socket", async () => {
+  await expect(connectImap({ ...cfg, host: "127.0.0.1" })).rejects.toThrow("Unsupported mail server");
+  await expect(connectImap({ ...cfg, port: 80 })).rejects.toThrow("Unsupported mail port");
+});
+
 test("short-lived IMAP actions never auto-IDLE and consume asynchronous socket errors", async () => {
   const client = await connectImap(cfg);
   expect(state.options.disableAutoIdle).toBe(true);

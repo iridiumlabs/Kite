@@ -987,7 +987,13 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     for (let i = 0; i < 1000; i++) imap.mailbox("INBOX").append(mailSource({ id: `backfill-${i}@t` }));
     await runAccountSync(deps);
     const before = await folderByRole(t, accountId, "inbox");
-    expect((await allMessages(t)).length).toBe(300);
+    const messages = await allMessages(t);
+    expect(messages.length).toBe(300);
+    const deferred = messages.filter(m => m.needsClassification);
+    expect(deferred).toHaveLength(100);
+    expect(deferred.every(m => m.classifyAttempts === 0)).toBe(true);
+    expect(deferred.every(m => Array.isArray(m.classificationCategories))).toBe(true);
+    expect((await t.query(internal.syncStore.needsClassification, {})).length).toBeGreaterThan(0);
     expect(before.oldestUid).toBe(701);
     expect(before.backfillDone).toBe(false);
     now.t += 11 * 60 * 1000;

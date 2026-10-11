@@ -6,6 +6,7 @@ import { internal } from "../_generated/api";
 import nodemailer from "nodemailer";
 import { connectImap, capabilitiesOf } from "./imap";
 import { decryptCredentials, encryptCredentials } from "./crypto";
+import { validateMailServer } from "../lib/mailServers";
 
 export function smtpTransport(cfg: {
   host: string;
@@ -14,10 +15,12 @@ export function smtpTransport(cfg: {
   username: string;
   password: string;
 }) {
+  const host = validateMailServer("smtp", cfg.host, cfg.port, cfg.secure);
   return nodemailer.createTransport({
-    host: cfg.host,
+    host,
     port: cfg.port,
     secure: cfg.secure,
+    requireTLS: !cfg.secure,
     auth: { user: cfg.username, pass: cfg.password },
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,

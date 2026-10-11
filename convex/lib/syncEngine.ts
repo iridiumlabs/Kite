@@ -619,6 +619,20 @@ export async function buildIngestArgs(
     const outbound = isOwner(meta.from.email, ownerAddresses);
     const snippet = makeSnippet(bodies[i]);
     const classified = classifyResults.get(i);
+    const deferred = !outbound && (folder.role === "inbox" || folder.role === "junk") && !classified;
+    const needsRetry = classified?.needsRetry ?? deferred;
+    const fallbackInbox = deferred ? heuristicClassify({
+      folderRole: folder.role,
+      from: meta.from,
+      bulk: meta.bulk,
+      headers: {
+        listUnsubscribe: meta.headers.listUnsubscribe,
+        listId: meta.headers.listId !== undefined,
+        precedence: meta.headers.precedence,
+        autoSubmitted: meta.headers.autoSubmitted,
+      },
+      isReplyToOwnerThread: false,
+    }) : "primary";
     out.push({
       uid: meta.uid,
       messageIdHeader: meta.messageIdHeader,
@@ -639,13 +653,13 @@ export async function buildIngestArgs(
       hasAttachments: meta.hasAttachments,
       attachments: meta.attachments,
       size: meta.size,
-      inbox: outbound ? undefined : (classified?.inbox ?? "primary"),
+      inbox: outbound ? undefined : (classified?.inbox ?? fallbackInbox),
       categoryIds: classified?.categoryIds ?? [],
       classifiedBy: outbound
         ? undefined
         : (classified?.classifiedBy ?? "heuristic"),
-      needsClassification: classified?.needsRetry ?? false,
-      classificationCategories: classified?.needsRetry ? categories : undefined,
+      needsClassification: needsRetry,
+      classificationCategories: needsRetry ? categories : undefined,
       classifyAttempts: classified?.needsRetry ? 1 : 0,
       bulk: meta.bulk,
       postDraftId: meta.postDraftId,

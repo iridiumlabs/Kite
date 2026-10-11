@@ -9,6 +9,14 @@ import { makeMessage, makeT, modules, seedAccount } from "./testUtil";
 
 afterEach(() => vi.useRealTimers());
 
+test("account connection rejects unsupported endpoints before any socket action", async () => {
+  const user = makeT().withIdentity({ subject: "a" });
+  const args = { email: "me@x.com", password: "test" };
+  await expect(user.action(api.accounts.connect, { ...args, imapHost: "127.0.0.1" })).rejects.toThrow("Unsupported mail server");
+  await expect(user.action(api.accounts.connect, { ...args, smtpHost: "169.254.169.254" })).rejects.toThrow("Unsupported mail server");
+  await expect(user.action(api.accounts.connect, { ...args, imapPort: 80 })).rejects.toThrow("Unsupported mail port");
+});
+
 test("recipient suggestions reject foreign accounts, even for an empty prefix", async () => {
   const t = makeT();
   const own = await seedAccount(t, "a");

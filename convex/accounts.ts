@@ -11,6 +11,7 @@ import { requireUserId } from "./model/auth";
 import { writeThread } from "./model/threads";
 import { apiKeyArg } from "./validators";
 import { normalizeEmail } from "./lib/addresses";
+import { validateMailServer } from "./lib/mailServers";
 import { Id } from "./_generated/dataModel";
 
 interface AccountCapabilities {
@@ -302,6 +303,8 @@ export const connect = action({
     const smtpHost = args.smtpHost ?? DEFAULT_SMTP_HOST;
     const smtpPort = args.smtpPort ?? 465;
     const smtpSecure = args.smtpSecure ?? smtpPort === 465;
+    validateMailServer("imap", imapHost, imapPort, imapSecure);
+    validateMailServer("smtp", smtpHost, smtpPort, smtpSecure);
 
     const { capabilities }: { capabilities: AccountCapabilities } =
       await ctx.runAction(internal.node.accountsOps.testConnectionNow, {

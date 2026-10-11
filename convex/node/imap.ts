@@ -16,6 +16,7 @@ import type {
 import type { FolderStatus, SyncCapabilities } from "../lib/syncPlan";
 import type { Address } from "../lib/types";
 import { normalizeMessageId, normalizeEmail } from "../lib/addresses";
+import { validateMailServer } from "../lib/mailServers";
 
 export interface ImapAccountConfig {
   host: string;
@@ -28,8 +29,9 @@ export interface ImapAccountConfig {
 export async function connectImap(
   cfg: ImapAccountConfig,
 ): Promise<ImapFlow> {
+  const host = validateMailServer("imap", cfg.host, cfg.port, cfg.secure);
   const client = new ImapFlow({
-    host: cfg.host,
+    host,
     port: cfg.port,
     secure: cfg.secure,
     auth: { user: cfg.username, pass: cfg.password },
