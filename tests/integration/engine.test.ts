@@ -1034,6 +1034,48 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     expect((await allMessages(t)).map(m => m.folderRole)).toEqual(["archive", "archive", "archive"]);
   });
 
+  test.each([true, false])("moves without COPYUID never reuse source UIDs (MOVE=%s)", async canMove => {
+    const { t, accountId, imap, deps, now } = await world();
+    imap.caps.move = canMove;
+    imap.caps.uidplus = false;
+    imap.mailbox("INBOX").append(mailSource({ id: "moving@t" }));
+    // The same UID in the target belongs to an unrelated message.
+    imap.mailbox("Archive").append(mailSource({ id: "unrelated@t" }));
+    await runAccountSync(deps);
+    const moving = (await allMessages(t)).find(m => m.messageIdHeader === "moving@t")!;
+    const unrelated = (await allMessages(t)).find(m => m.messageIdHeader === "unrelated@t")!;
+    const move = imap.moveOrCopy.bind(imap);
+    imap.moveOrCopy = async (...args) => { await move(...args); return new Map(); };
+    await t.withIdentity({ subject: USER }).mutation(api.mail.archive, { threadIds: [moving.threadId] });
+    now.t = Date.now();
+    await runPendingOps(deps, imap.caps);
+    const unresolved = await t.run(ctx => ctx.db.get(moving._id as Id<"messages">));
+    expect(unresolved?.uid).toBeUndefined();
+    expect(unresolved?.folderRole).toBe("archive");
+    expect((await folderByRole(t, accountId, "archive")).uidNext).toBe(1);
+    expect(await t.run(ctx => ctx.db.get(unrelated._id))).toEqual(unrelated);
+    await runAccountSync(deps);
+    const reconciled = await t.run(ctx => ctx.db.get(moving._id as Id<"messages">));
+    expect(reconciled?.uid).toBe(2);
+    expect(reconciled?.folderRole).toBe("archive");
+    expect(await allMessages(t)).toHaveLength(2);
+    expect((await folderByRole(t, accountId, "archive")).syncedUids).toBe("1-2");
+  });
+
+  test("a sync reconciles moves without COPYUID in the same run", async () => {
+    const { t, imap, deps, now } = await world();
+    imap.mailbox("INBOX").append(mailSource({ id: "same-run@t" }));
+    await runAccountSync(deps);
+    const message = (await allMessages(t))[0];
+    const move = imap.moveOrCopy.bind(imap);
+    imap.moveOrCopy = async (...args) => { await move(...args); return new Map(); };
+    await t.withIdentity({ subject: USER }).mutation(api.mail.archive, { threadIds: [message.threadId] });
+    now.t = Date.now();
+    await runAccountSync(deps);
+    expect(await allMessages(t)).toHaveLength(1);
+    expect(await t.run(ctx => ctx.db.get(message._id))).toMatchObject({ folderRole: "archive", uid: 1 });
+  });
+
   test("foreign-client remote drafts are imported only once", async () => {
     const { t, imap, deps, now } = await world();
     imap.mailbox("Drafts").append(mailSource({ id: "foreign-draft@t", from: OWNER_EMAIL }));

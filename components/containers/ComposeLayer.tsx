@@ -10,7 +10,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { composeAccount } from "@/lib/ui/composeAccount";
-import { initialComposeBody } from "@/lib/ui/composeBody";
+import { initialComposeBody, replacementComposeSignature } from "@/lib/ui/composeBody";
 import { draftSendProblem } from "@/lib/ui/draftSendProblem";
 import {
   ComposeWindow,
@@ -564,6 +564,7 @@ function ComposePane({
   });
 
   const bodyInitializedRef = useRef(false);
+  const signatureBodyRef = useRef<string | undefined>(undefined);
   // Insert signatures through the editor parser once, without overwriting
   // saved draft bodies or text typed before asynchronous data was ready.
   useEffect(() => {
@@ -573,6 +574,7 @@ function ComposePane({
       const account = composeAccount(accounts, accountId, defaultAccountId);
       const html = initialComposeBody(win.mode, existingDraft?.html, account?.signatureHtml);
       if (html) editor.commands.setContent(html, { emitUpdate: false });
+      if (win.mode !== "draft") signatureBodyRef.current = editor.getHTML();
     }
     htmlRef.current = editor.getHTML();
     textRef.current = editor.getText();
@@ -773,6 +775,15 @@ function ComposePane({
                     <Menu.Item
                       key={a.id}
                       onClick={() => {
+                        if (editor) {
+                          const html = replacementComposeSignature(win.mode, editor.getHTML(), signatureBodyRef.current, a.signatureHtml);
+                          if (html !== undefined) {
+                            editor.commands.setContent(html, { emitUpdate: false });
+                            signatureBodyRef.current = editor.getHTML();
+                            htmlRef.current = editor.getHTML();
+                            textRef.current = editor.getText();
+                          }
+                        }
                         setAccountId(a.id);
                         queueSave();
                       }}

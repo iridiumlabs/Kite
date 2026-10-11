@@ -320,7 +320,7 @@ export interface StorePort {
       messageId: string;
       folderId: string;
       folderRole: FolderRole;
-      uid: number;
+      uid?: number;
     }[],
     folderPatches: { folderId: string; patch: FolderPatch }[],
   ): Promise<void>;

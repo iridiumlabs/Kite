@@ -164,6 +164,9 @@ export async function runAccountSync(deps: EngineDeps): Promise<SyncOutcome> {
 
   const caps = await imap.capabilities();
   outcome.opsProcessed = await runPendingOps(deps, caps);
+  // Moves commit folder state (including reconciliation requests). Plan this
+  // sync from that state, not the snapshot taken before executing the ops.
+  if (outcome.opsProcessed > 0) folders = (await store.getAccountState())?.folders ?? folders;
 
   const capsChanged =
     !account.capabilities ||
@@ -965,7 +968,7 @@ async function executeOp(
 ) {
   const { imap, store } = deps;
 
-  const state = await store.getAccountState();
+  let state = await store.getAccountState();
   // The doc's folder reflects the desired state the moment a move op is
   // enqueued (mutations patch it optimistically), so the true remote
   // location is resolved from the folders' syncedUids instead.
@@ -1046,6 +1049,7 @@ async function executeOp(
         targetPath = defaultPathForRole(mv.targetRole);
         await imap.createMailbox(targetPath);
         await store.upsertFolder({ path: targetPath, role: mv.targetRole });
+        state = await store.getAccountState();
       }
       const sourcePath = sourcePathFor(mv.folderPath, r.uid);
       if (
@@ -1219,6 +1223,10 @@ async function applyMoveResult(
     const fs = new FolderState(target);
     fs.addSynced(newUid, mask);
     folderPatches.push({ folderId: target._id, patch: fs.patch() });
+  } else {
+    // Without COPYUID the destination UID is unknown. Rescan metadata by
+    // Message-ID; never borrow a mailbox-local UID from the source folder.
+    folderPatches.push({ folderId: target._id, patch: { uidNext: 1 } });
   }
 
   await store.applyMoveResults(
@@ -1227,7 +1235,7 @@ async function applyMoveResult(
         messageId: mv.messageId,
         folderId: target._id,
         folderRole: mv.targetRole,
-        uid: newUid ?? r.uid,
+        uid: newUid,
       },
     ],
     folderPatches,

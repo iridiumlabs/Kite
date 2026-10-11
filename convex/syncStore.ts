@@ -759,7 +759,7 @@ export const applyMoveResults = internalMutation({
         messageId: v.id("messages"),
         folderId: v.id("folders"),
         folderRole: folderRoleV,
-        uid: v.number(),
+        uid: v.optional(v.number()),
       }),
     ),
     folderPatches: v.array(

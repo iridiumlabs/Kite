@@ -95,6 +95,8 @@ function CollapsedRow({
   return (
     <button
       onClick={onOpen}
+      aria-expanded={false}
+      aria-label={`Expand message from ${senderDisplay(message.from)}`}
       className="mail-row flex items-center h-13 gap-3 shrink-0 border-t border-divider w-full text-left"
     >
       <Avatar
@@ -130,6 +132,7 @@ function ExpandedMessage({
   onReplyAll,
   onForward,
   onDownloadAttachment,
+  onCollapse,
   onRetryContent,
   onLoadRemote,
   recipientSummary,
@@ -141,6 +144,7 @@ function ExpandedMessage({
   onReplyAll: () => void;
   onForward: () => void;
   onDownloadAttachment: (a: AttachmentInfo) => void;
+  onCollapse: () => void;
   onRetryContent?: () => void;
   onLoadRemote?: () => void;
   recipientSummary?: (m: MessageItem) => string;
@@ -178,6 +182,14 @@ function ExpandedMessage({
           <div className="tnum text-tertiary text-xs/4">
             {formatMessageDate(message.date)}
           </div>
+          <button
+            aria-label={`Collapse message from ${senderDisplay(message.from)}`}
+            aria-expanded={true}
+            onClick={onCollapse}
+            className="icon-btn text-tertiary"
+          >
+            <ChevronUp size={15} strokeWidth={1.8} />
+          </button>
           <button
             aria-label="Reply"
             onClick={onReply}
@@ -342,6 +354,7 @@ export function Reader(p: ReaderProps) {
                 onReplyAll={() => p.onReplyAll(m)}
                 onForward={() => p.onForward(m)}
                 onDownloadAttachment={(a) => p.onDownloadAttachment(m, a)}
+                onCollapse={() => p.onToggleMessage(m.id)}
                 onRetryContent={() => p.onRetryContent?.(m.id)}
                 onLoadRemote={() => p.onLoadRemote?.(m.id)}
                 recipientSummary={p.recipientSummary}

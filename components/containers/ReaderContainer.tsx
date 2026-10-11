@@ -1,5 +1,7 @@
 "use client";
 
+import { expandedMessageIds, toggleMessageExpansion } from "@/lib/ui/messageExpansion";
+
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
@@ -107,27 +109,16 @@ export function ReaderContainer({
     return s;
   }, [data]);
 
-  const expandedIds = useMemo(() => {
-    const s = new Set(defaultExpanded);
-    for (const id of collapsedIds) s.delete(id);
-    for (const id of extraIds) s.add(id);
-    return s;
-  }, [defaultExpanded, collapsedIds, extraIds]);
+  const expandedIds = useMemo(
+    () => expandedMessageIds(defaultExpanded, collapsedIds, extraIds),
+    [defaultExpanded, collapsedIds, extraIds],
+  );
 
   const onToggleMessage = useCallback((id: string) => {
-    setExtraIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
+    const next = toggleMessageExpansion(id, expandedIds, collapsedIds, extraIds);
+    setCollapsedIds(next.collapsed);
+    setExtraIds(next.extra);
+  }, [expandedIds, collapsedIds, extraIds]);
 
   // mark read on open
   const marked = useRef<string | null>(null);

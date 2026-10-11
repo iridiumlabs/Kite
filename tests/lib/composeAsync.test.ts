@@ -1,5 +1,7 @@
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
-import { type ReactElement } from "react";
+import { isValidElement, type ReactElement } from "react";
+import { Menu } from "@base-ui/react/menu";
+import type { AccountInfo } from "../../lib/ui/types";
 import { getFunctionName } from "convex/server";
 import { ComposeLayer } from "../../components/containers/ComposeLayer";
 import type { ComposeWindowProps } from "../../components/compose/ComposeWindow";
@@ -10,6 +12,7 @@ const h = vi.hoisted(() => ({
   stateIndex: 0, refIndex: 0, effectIndex: 0, pendingEffects: [] as (() => void)[],
   mutations: new Map<string, ReturnType<typeof vi.fn>>(),
   content: vi.fn(), close: vi.fn(), error: vi.fn(), draft: undefined as unknown,
+  editor: null as unknown, onEditorUpdate: undefined as ((html: string, text: string) => void) | undefined,
 }));
 vi.mock("react", async original => ({
   ...await original<typeof import("react")>(),
@@ -44,7 +47,10 @@ vi.mock("convex/react", () => ({
   useAction: () => h.content,
   useMutation: (ref: Parameters<typeof getFunctionName>[0]) => h.mutations.get(getFunctionName(ref)),
 }));
-vi.mock("../../components/compose/Editor", () => ({ useComposeEditor: () => null, ComposeEditorArea: () => null }));
+vi.mock("../../components/compose/Editor", () => ({
+  useComposeEditor: (opts: { onUpdate: typeof h.onEditorUpdate }) => { h.onEditorUpdate = opts.onUpdate; return h.editor; },
+  ComposeEditorArea: () => null,
+}));
 vi.mock("../../lib/ui/useMediaQuery", () => ({ useMediaQuery: () => false }));
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { error: h.error }) }));
 vi.mock("../../lib/ui/store", () => ({ useUI: (selector?: (s: unknown) => unknown) => {
@@ -53,7 +59,11 @@ vi.mock("../../lib/ui/store", () => ({ useUI: (selector?: (s: unknown) => unknow
 } }));
 
 const win = { id: "window", mode: "forward", replyToMessageId: "message", expanded: false, minimized: false };
-const accounts = [{ id: "account", email: "me@x.com", displayName: "Me", status: "active" as const }];
+const accounts: AccountInfo[] = [
+  { id: "account", email: "me@x.com", displayName: "Me", status: "ready", signatureHtml: "<p>Signature A</p>" },
+  { id: "second", email: "second@x.com", status: "ready", signatureHtml: "<p>Signature B</p>" },
+  { id: "no-signature", email: "none@x.com", status: "ready" },
+];
 const originalAttachment = { id: "a0", filename: "original.txt", contentType: "text/plain", size: 10 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -77,6 +87,7 @@ beforeEach(() => {
   h.states = []; h.refs = []; h.effects = []; h.pendingEffects = [];
   h.stateIndex = h.refIndex = h.effectIndex = 0;
   h.content.mockReset().mockReturnValue(new Promise(() => {})); h.close.mockReset(); h.error.mockReset(); h.draft = undefined;
+  h.editor = null; h.onEditorUpdate = undefined;
   h.mutations.clear();
   for (const name of ["create", "update", "discard", "addAttachment", "removeAttachment", "generateUploadUrl", "scheduleSend", "cancelScheduledSend"])
     h.mutations.set(`drafts:${name}`, vi.fn().mockResolvedValue(name === "create" ? "draft" : name === "generateUploadUrl" ? "https://upload.test" : undefined));
@@ -148,4 +159,53 @@ test("discard during a send's save cannot queue the discarded draft", async () =
   props().onDiscard(); create.resolve("discarded-draft"); await settle();
   expect(h.mutations.get("drafts:scheduleSend")).not.toHaveBeenCalled();
   expect(h.mutations.get("drafts:discard")).toHaveBeenCalledWith({ draftId: "discarded-draft" });
+});
+
+function senderItems(node: unknown): ReactElement<{ onClick: () => void }>[] {
+  if (Array.isArray(node)) return node.flatMap(senderItems);
+  if (!isValidElement(node)) return [];
+  if (node.type === Menu.Item) return [node as ReactElement<{ onClick: () => void }>];
+  return senderItems((node.props as { children?: unknown }).children);
+}
+
+async function mountSignatureEditor() {
+  let html = "<p></p>";
+  const editor = {
+    getHTML: () => html,
+    getText: () => html.replace(/<[^>]*>/g, ""),
+    commands: { setContent: vi.fn((value: string) => { html = value || "<p></p>"; }) },
+  };
+  h.editor = editor;
+  h.content.mockResolvedValue({ attachments: [] });
+  h.states = []; h.refs = []; h.effects = []; render(); render();
+  await settle();
+  return editor;
+}
+
+test("the sender menu replaces an untouched signature and saves the new sender's body", async () => {
+  const editor = await mountSignatureEditor();
+  expect(editor.getHTML()).toContain("Signature A");
+  senderItems(props().fromLabel)[1].props.onClick(); render();
+  expect(editor.getHTML()).toBe("<p></p><p>Signature B</p>");
+  await vi.advanceTimersByTimeAsync(800);
+  expect(h.mutations.get("drafts:create")).toHaveBeenCalledWith(expect.objectContaining({ accountId: "second", html: "<p></p><p>Signature B</p>", text: "Signature B" }));
+});
+
+test("switching to an account without a signature removes only the pristine signature", async () => {
+  const editor = await mountSignatureEditor();
+  senderItems(props().fromLabel)[2].props.onClick(); render();
+  expect(editor.getText()).toBe("");
+  // The parsed empty body is tracked too, so switching back can add a signature.
+  senderItems(props().fromLabel)[1].props.onClick(); render();
+  expect(editor.getText()).toBe("Signature B");
+});
+
+test("the sender menu preserves typed content rather than replacing the whole body", async () => {
+  const editor = await mountSignatureEditor();
+  editor.commands.setContent("<p>My writing</p><p>Signature A</p>");
+  h.onEditorUpdate!(editor.getHTML(), editor.getText());
+  senderItems(props().fromLabel)[1].props.onClick(); render();
+  expect(editor.getHTML()).toBe("<p>My writing</p><p>Signature A</p>");
+  await vi.advanceTimersByTimeAsync(800);
+  expect(h.mutations.get("drafts:create")).toHaveBeenCalledWith(expect.objectContaining({ accountId: "second", html: editor.getHTML() }));
 });

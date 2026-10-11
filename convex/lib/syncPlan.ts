@@ -244,7 +244,14 @@ export function reconcileMoves(
     const alreadyThere = existing.find(
       (e) => e.folderId === msg.folderId && e.uid === msg.uid,
     );
-    if (!alreadyThere) inserts.push(msg);
+    if (alreadyThere) continue;
+    // A successful move without COPYUID leaves its local doc in the target
+    // folder with no UID until this metadata scan resolves it by Message-ID.
+    const unresolved = existing.find(e => e.folderId === msg.folderId && e.uid === undefined && !relocatedDocIds.has(e.docId));
+    if (unresolved) {
+      relocatedDocIds.add(unresolved.docId);
+      relocations.push({ docId: unresolved.docId, folderId: msg.folderId, folderRole: msg.folderRole, uid: msg.uid });
+    } else inserts.push(msg);
   }
 
   for (const v of vanished) {
