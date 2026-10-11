@@ -35,6 +35,7 @@ export interface AccountInfo {
 
 export interface ThreadItem {
   id: string;
+  location?: "inbox" | "archive" | "trash" | "none";
   subject: string;
   participants: AddressInfo[];
   snippet: string;

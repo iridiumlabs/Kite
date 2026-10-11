@@ -32,7 +32,7 @@ const zDraftOut = z.object({
       size: z.number(),
     }),
   ),
-  status: z.enum(["editing", "scheduled", "sending", "failed"]),
+  status: z.enum(["editing", "scheduled", "sending", "uncertain", "failed"]),
   scheduledAt: z.string().optional(),
   updatedAt: z.string(),
   replyToMessageId: z.string().optional(),

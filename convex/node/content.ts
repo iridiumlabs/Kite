@@ -131,7 +131,7 @@ interface MessageContentResult {
 }
 
 export const getMessageContent = internalAction({
-  args: { messageId: v.id("messages") },
+  args: { messageId: v.id("messages"), loadRemoteImages: v.optional(v.boolean()) },
   handler: async (ctx, args): Promise<MessageContentResult> => {
     const resolved = await resolveRemote(ctx, args.messageId);
     if ("moved" in resolved) {
@@ -150,7 +150,7 @@ export const getMessageContent = internalAction({
         internal.syncStore.settingsForUser,
         { userId: ref!.message.userId },
       );
-      const loadRemote: boolean = settings?.loadRemoteImages ?? false;
+      const loadRemote: boolean = args.loadRemoteImages ?? settings?.loadRemoteImages ?? false;
 
       const cidMap = new Map<string, string>();
       let inlineTotal = 0;

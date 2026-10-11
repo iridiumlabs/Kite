@@ -28,7 +28,6 @@ import type {
   AttachmentInfo,
 } from "@/lib/ui/types";
 import { useMediaQuery } from "@/lib/ui/useMediaQuery";
-import { useRouter } from "next/navigation";
 import { Menu } from "@base-ui/react/menu";
 import { Popover } from "@base-ui/react/popover";
 import {
@@ -295,7 +294,6 @@ function ComposePane({
   defaultAccountId?: string;
 }) {
   const ui = useUI();
-  const router = useRouter();
   const isMobile = useMediaQuery("(max-width: 767px)");
   const existingDraft = useQuery(
     api.drafts.get,
@@ -318,7 +316,6 @@ function ComposePane({
   const scheduleSend = useMutation(api.drafts.scheduleSend);
   const cancelSchedule = useMutation(api.drafts.cancelScheduledSend);
   const genUploadUrl = useMutation(api.drafts.generateUploadUrl);
-  const sendDraftAction = useAction(api.send.sendDraft);
   const getContent = useAction(api.content.getMessageContent);
 
   const [to, setTo] = useState<RecipientChip[]>([]);
@@ -414,6 +411,7 @@ function ComposePane({
 
   // forward mode: copy the original attachments into the draft once
   const forwardedRef = useRef(false);
+  const forwardLoadRef = useRef<Promise<boolean> | null>(null);
   useEffect(() => {
     if (
       forwardedRef.current ||
@@ -423,7 +421,7 @@ function ComposePane({
       return;
     }
     forwardedRef.current = true;
-    void getContent({
+    forwardLoadRef.current = getContent({
       messageId: win.replyToMessageId as Id<"messages">,
     })
       .then((c) => {
@@ -445,8 +443,9 @@ function ComposePane({
             size: a.size,
           })),
         ]);
+        return true;
       })
-      .catch(() => {});
+      .catch(() => false);
   }, [win, getContent]);
 
   const wantsQuote =
@@ -469,6 +468,13 @@ function ComposePane({
 
   const save = useCallback(async (): Promise<Id<"drafts"> | undefined> => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
+    // Create the forward draft only after its original attachments are known.
+    // Every save/send/attachment path shares this gate, so no early autosave
+    // can permanently omit attachments that finish loading later.
+    if (win.mode === "forward" && forwardLoadRef.current && !await forwardLoadRef.current) {
+      toast.error("Could not load forwarded attachments. Reopen the forward to try again.");
+      return undefined;
+    }
     while (savingRef.current) await savingRef.current;
     const operation = async (): Promise<Id<"drafts"> | undefined> => {
     const acct = composeAccount(accounts, accountId, defaultAccountId)?.id as Id<"accounts"> | undefined;
@@ -631,43 +637,29 @@ function ComposePane({
     }
     const id = await save();
     if (!id) return;
-    ui.closeCompose(win.id);
     const delay = Math.max(undoSendSeconds, 0) * 1000;
-    const idem = `${id}-${Date.now()}`;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      if (cancelled) return;
-      sendDraftAction({ draftId: id, idempotencyKey: idem })
-        .then((outcome) => {
-          const o = outcome as { threadId?: string } | undefined;
-          toast.success("Message sent", {
-            action: o?.threadId
-              ? {
-                  label: "View",
-                  onClick: () => {
-                    router.push(`/mail/sent/t/${o.threadId}`);
-                  },
-                }
-              : undefined,
-          });
-        })
-        .catch((e) => {
-          toast.error(
-            e instanceof Error ? e.message : "The message could not be sent",
-          );
-          ui.openCompose({ mode: "draft", draftId: id });
-        });
-    }, delay || 0);
+    try {
+      // Persist the send before closing. Reloading or closing this tab cannot
+      // destroy the undo countdown or the eventual SMTP job.
+      await scheduleSend({ draftId: id, at: Date.now() + delay });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not queue message");
+      return;
+    }
+    ui.closeCompose(win.id);
     toast("Sending…", {
       duration: delay || 2000,
-      action: {
+      action: delay > 0 ? {
         label: "Undo",
-        onClick: () => {
-          cancelled = true;
-          clearTimeout(timer);
-          ui.openCompose({ mode: "draft", draftId: id });
+        onClick: async () => {
+          try {
+            await cancelSchedule({ draftId: id });
+            ui.openCompose({ mode: "draft", draftId: id });
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "The send can no longer be undone");
+          }
         },
-      },
+      } : undefined,
     });
   };
 

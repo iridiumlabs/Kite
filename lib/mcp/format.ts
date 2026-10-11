@@ -112,7 +112,7 @@ export interface DraftDoc {
   text: string;
   attachments: { filename: string; contentType: string; size: number }[];
   scheduledAt?: number;
-  status: "editing" | "scheduled" | "sending" | "failed";
+  status: "editing" | "scheduled" | "sending" | "uncertain" | "failed";
   sendError?: string;
   updatedAt: number;
 }

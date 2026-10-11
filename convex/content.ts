@@ -15,7 +15,7 @@ export const messageOwner = internalQuery({
 
 // Fetches and sanitizes the full content of a message from IMAP.
 export const getMessageContent = action({
-  args: { ...apiKeyArg, messageId: v.id("messages") },
+  args: { ...apiKeyArg, messageId: v.id("messages"), loadRemoteImages: v.optional(v.boolean()) },
   handler: async (ctx, args): Promise<unknown> => {
     const userId = await requireUserId(ctx, args.apiKey);
     const owner = await ctx.runQuery(internal.content.messageOwner, {
@@ -26,6 +26,7 @@ export const getMessageContent = action({
     }
     return await ctx.runAction(internal.node.content.getMessageContent, {
       messageId: args.messageId,
+      loadRemoteImages: args.loadRemoteImages,
     });
   },
 });

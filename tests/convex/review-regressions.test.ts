@@ -9,6 +9,71 @@ import { makeMessage, makeT, modules, seedAccount } from "./testUtil";
 
 afterEach(() => vi.useRealTimers());
 
+test("undo-send is a durable backend job and cancellation prevents its execution", async () => {
+  vi.useFakeTimers();
+  const delivered = vi.fn();
+  const t = convexTest(schema, {
+    ...modules,
+    "../../convex/send.ts": async () => ({
+      sendScheduledDraft: internalAction({
+        args: { draftId: v.id("drafts") },
+        handler: async (_ctx, args) => { delivered(args.draftId); },
+      }),
+    }),
+  });
+  const accountId = await seedAccount(t, "a");
+  const user = t.withIdentity({ subject: "a" });
+  const create = () => user.mutation(api.drafts.create, { accountId, to: [{ email: "r@x.com" }] });
+  const first = await create();
+  const cancelled = await create();
+  const at = Date.now() + 5000;
+  await user.mutation(api.drafts.scheduleSend, { draftId: first, at });
+  await user.mutation(api.drafts.scheduleSend, { draftId: cancelled, at });
+  const persisted = await user.query(api.drafts.get, { draftId: first });
+  expect(persisted?.scheduledJobId).toBeDefined();
+  expect(persisted?.status).toBe("scheduled");
+  await user.mutation(api.drafts.cancelScheduledSend, { draftId: cancelled });
+  await vi.advanceTimersByTimeAsync(5000);
+  await t.finishInProgressScheduledFunctions();
+  expect(delivered).toHaveBeenCalledTimes(1);
+  expect(delivered).toHaveBeenCalledWith(first);
+});
+
+test("remote-image consent is forwarded only for the requested message without changing settings", async () => {
+  const t = convexTest(schema, {
+    ...modules,
+    "../../convex/node/content.ts": async () => ({
+      getMessageContent: internalAction({
+        args: v.any(),
+        handler: async (_ctx, args: { loadRemoteImages?: boolean }) => ({ loadRemoteImages: args.loadRemoteImages ?? false }),
+      }),
+    }),
+  });
+  const accountId = await seedAccount(t, "a");
+  const first = await t.mutation(internal.ingest.ingest, makeMessage("a", accountId));
+  const second = await t.mutation(internal.ingest.ingest, makeMessage("a", accountId));
+  const user = t.withIdentity({ subject: "a" });
+  expect(await user.action(api.content.getMessageContent, { messageId: first.messageId, loadRemoteImages: true })).toEqual({ loadRemoteImages: true });
+  expect(await user.action(api.content.getMessageContent, { messageId: second.messageId })).toEqual({ loadRemoteImages: false });
+  expect((await user.query(api.settings.get, {})).loadRemoteImages).toBe(false);
+  await expect(t.withIdentity({ subject: "b" }).action(api.content.getMessageContent, {
+    messageId: first.messageId, loadRemoteImages: true,
+  })).rejects.toThrow("Message not found");
+});
+
+test("trash undo can restore Archive without changing ordinary inbox restores", async () => {
+  const t = makeT();
+  const accountId = await seedAccount(t, "a");
+  const message = await t.mutation(internal.ingest.ingest, makeMessage("a", accountId, { folderRole: "archive" }));
+  const user = t.withIdentity({ subject: "a" });
+  await user.mutation(api.mail.trash, { threadIds: [message.threadId] });
+  await user.mutation(api.mail.restore, { threadIds: [message.threadId], targetRole: "archive" });
+  expect((await t.run(ctx => ctx.db.get(message.threadId)))?.location).toBe("archive");
+  await user.mutation(api.mail.trash, { threadIds: [message.threadId] });
+  await user.mutation(api.mail.restore, { threadIds: [message.threadId] });
+  expect((await t.run(ctx => ctx.db.get(message.threadId)))?.location).toBe("inbox");
+});
+
 test("account connection rejects unsupported endpoints before any socket action", async () => {
   const user = makeT().withIdentity({ subject: "a" });
   const args = { email: "me@x.com", password: "test" };

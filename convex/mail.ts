@@ -295,7 +295,7 @@ export const trash = mutation({
 });
 
 export const restore = mutation({
-  args: { ...apiKeyArg, ...threadTargets },
+  args: { ...apiKeyArg, ...threadTargets, targetRole: v.optional(v.union(v.literal("inbox"), v.literal("archive"))) },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
     checkBulkIds(args.threadIds, args.messageIds);
@@ -310,7 +310,7 @@ export const restore = mutation({
       userId,
       targets,
       (m) => m.folderRole === "archive" || m.folderRole === "trash",
-      "inbox",
+      args.targetRole ?? "inbox",
     );
   },
 });

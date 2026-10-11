@@ -10,6 +10,7 @@ import {
   type EngineDeps,
 } from "../lib/syncEngine";
 import { parseUidSet, addUids, formatUidSet } from "../lib/uidset";
+import { selectSearchHits } from "../lib/searchHits";
 import type { ActionCtx } from "../_generated/server";
 import { connectImap, FlowPort, accountToImapConfig } from "./imap";
 import { MailParserPort } from "./mailParser";
@@ -280,7 +281,8 @@ export const deepSearchInternal = internalAction({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const limit = Math.min(args.limit ?? 50, 50);
+    const limit = Math.max(0, Math.min(Math.floor(args.limit ?? 50), 50));
+    if (limit === 0) return { messageIds: [] };
     const owner = crypto.randomUUID();
     try {
       await ctx.runMutation(internal.syncStore.acquireLease, {
@@ -302,8 +304,9 @@ export const deepSearchInternal = internalAction({
         const found: { folder: (typeof state.folders)[number]; uid: number }[] =
           [];
         const alreadySynced: { folderId: string; uids: number[] }[] = [];
+        let hitCount = 0;
         for (const folder of state.folders) {
-          if (found.length >= limit) break;
+          if (hitCount >= limit) break;
           const synced = new Set<number>();
           for (const [a, b] of parseUidSet(folder.syncedUids)) {
             for (let u = a; u <= b; u++) synced.add(u);
@@ -314,14 +317,10 @@ export const deepSearchInternal = internalAction({
           } catch {
             continue;
           }
-          for (const uid of uids.sort((x, y) => y - x)) {
-            if (found.length >= limit) break;
-            if (synced.has(uid)) {
-              alreadySynced.push({ folderId: folder._id, uids: [uid] });
-              continue;
-            }
-            found.push({ folder, uid });
-          }
+          const selected = selectSearchHits(uids, synced, limit - hitCount);
+          hitCount += selected.synced.length + selected.unsynced.length;
+          if (selected.synced.length) alreadySynced.push({ folderId: folder._id, uids: selected.synced });
+          for (const uid of selected.unsynced) found.push({ folder, uid });
         }
         const messageIds: string[] = [];
         for (const s of alreadySynced) {
@@ -362,7 +361,7 @@ export const deepSearchInternal = internalAction({
             }
           }
         }
-        return { messageIds };
+        return { messageIds: messageIds.slice(0, limit) };
       } finally {
         await imap.close();
       }

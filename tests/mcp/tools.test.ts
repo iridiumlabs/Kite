@@ -211,7 +211,7 @@ function makeBackend(): PostBackend & {
           text: "hi",
           html: "",
           attachments: [],
-          status: "editing",
+          status: "uncertain",
           updatedAt: 1700000000000,
         } satisfies DraftDoc,
       ],
@@ -278,6 +278,22 @@ describe("tool surface", () => {
 });
 
 describe("read tools", () => {
+  it("uncertain drafts satisfy the list/get tool output schemas", async () => {
+    const list = await client.callTool({ name: "list_drafts", arguments: {} });
+    expect(list.isError).not.toBe(true);
+    expect((sc(list).items as Record<string, unknown>[])[0].status).toBe("uncertain");
+    const original = backend.getDraft;
+    try {
+      const draft = (await backend.listDrafts({ numItems: 50, cursor: null })).items[0];
+      backend.getDraft = async () => draft;
+      const get = await client.callTool({ name: "get_draft", arguments: { draftId: draft._id } });
+      expect(get.isError).not.toBe(true);
+      expect(sc(get).status).toBe("uncertain");
+    } finally {
+      backend.getDraft = original;
+    }
+  });
+
   it("list_accounts returns formatted accounts", async () => {
     const res = await client.callTool({ name: "list_accounts", arguments: {} });
     const out = sc(res);

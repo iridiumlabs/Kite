@@ -74,7 +74,6 @@ export function ReaderContainer({
   const snooze = useMutation(api.mail.snooze);
   const deleteForever = useMutation(api.mail.deleteForever);
   const assignCategories = useMutation(api.mail.assignCategories);
-  const updateSettings = useMutation(api.settings.update);
   const openCompose = useUI((s) => s.openCompose);
 
   const messages = useMemo(
@@ -85,7 +84,7 @@ export function ReaderContainer({
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
   const contentVersion = useSyncExternalStore(subscribeContent, contentSnapshot, serverContentSnapshot);
-  const [, setRemoteLoaded] = useState(false);
+  const [remoteImageIds, setRemoteImageIds] = useState<Set<string>>(new Set());
   const [now] = useState(() => Date.now());
 
   // reset per-thread expansion state when the thread changes
@@ -94,7 +93,7 @@ export function ReaderContainer({
     setPrevThread(threadId);
     setCollapsedIds(new Set());
     setExtraIds(new Set());
-    setRemoteLoaded(false);
+    setRemoteImageIds(new Set());
   }
 
   // default expansion: latest + all unread
@@ -156,7 +155,10 @@ export function ReaderContainer({
         );
       });
       Promise.race([
-        getContent({ messageId: m.id as Id<"messages"> }),
+        getContent({
+          messageId: m.id as Id<"messages">,
+          loadRemoteImages: remoteImageIds.has(m.id) ? true : undefined,
+        }),
         timeout,
       ])
         .then((res) => {
@@ -176,7 +178,7 @@ export function ReaderContainer({
           clearInflight(m.id);
         });
     }
-  }, [expandedIds, messages, getContent, contentVersion]);
+  }, [expandedIds, messages, getContent, contentVersion, remoteImageIds]);
 
   const onRetryContent = useCallback((id: string) => {
     evictCached(id);
@@ -209,9 +211,10 @@ export function ReaderContainer({
 
   const onTrash = useCallback(() => {
     void trash({ threadIds: [threadId] });
-    undoToast("Moved to Trash", () => void restore({ threadIds: [threadId] }));
+    const targetRole = data?.thread.location === "archive" ? "archive" : "inbox";
+    undoToast("Moved to Trash", () => void restore({ threadIds: [threadId], targetRole }));
     onClose();
-  }, [trash, restore, threadId, undoToast, onClose]);
+  }, [trash, restore, threadId, undoToast, onClose, data?.thread.location]);
 
   const onMarkUnread = useCallback(() => {
     void setRead({ threadIds: [threadId], read: false });
@@ -420,11 +423,9 @@ export function ReaderContainer({
       onForward={onForward}
       onDownloadAttachment={onDownloadAttachment}
       onRetryContent={onRetryContent}
-      onLoadRemote={() => {
-        setRemoteLoaded(true);
-        void updateSettings({ loadRemoteImages: true }).catch(() => {});
-        for (const m of messages) evictCached(m.id);
-
+      onLoadRemote={(id) => {
+        setRemoteImageIds(previous => new Set(previous).add(id));
+        evictCached(id);
       }}
       dark={dark}
       recipientSummary={(m) => {

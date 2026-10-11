@@ -52,7 +52,7 @@ export interface ReaderProps {
   onForward: (m: MessageItem) => void;
   onDownloadAttachment: (m: MessageItem, a: AttachmentInfo) => void;
   onRetryContent?: (id: string) => void;
-  onLoadRemote?: () => void;
+  onLoadRemote?: (messageId: string) => void;
   dark?: boolean;
   recipientSummary?: (m: MessageItem) => string;
   headerLeft?: ReactNode;
@@ -343,7 +343,7 @@ export function Reader(p: ReaderProps) {
                 onForward={() => p.onForward(m)}
                 onDownloadAttachment={(a) => p.onDownloadAttachment(m, a)}
                 onRetryContent={() => p.onRetryContent?.(m.id)}
-                onLoadRemote={p.onLoadRemote}
+                onLoadRemote={() => p.onLoadRemote?.(m.id)}
                 recipientSummary={p.recipientSummary}
               />
             ) : (

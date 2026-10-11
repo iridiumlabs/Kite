@@ -111,6 +111,7 @@ function toThreadItem(
 ): ThreadItem {
   return {
     id: t._id,
+    location: t.location,
     subject: t.subject,
     participants: t.participants,
     snippet: t.snippet,
@@ -413,8 +414,9 @@ export function MailApp() {
   const doTrash = useCallback(
     (t: ThreadItem) => {
       void trash({ threadIds: [t.id as Id<"threads">] });
+      const targetRole = t.location === "archive" ? "archive" : "inbox";
       undoable("Moved to Trash", () => {
-        void restore({ threadIds: [t.id as Id<"threads">] });
+        void restore({ threadIds: [t.id as Id<"threads">], targetRole });
       });
       if (threadId === t.id) closeThread();
     },
