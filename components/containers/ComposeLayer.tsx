@@ -10,6 +10,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { composeAccount } from "@/lib/ui/composeAccount";
+import { initialComposeBody } from "@/lib/ui/composeBody";
 import {
   ComposeWindow,
   QuotedPreview,
@@ -557,16 +558,20 @@ function ComposePane({
     },
   });
 
-  // load initial draft body into editor once ready
+  const bodyInitializedRef = useRef(false);
+  // Insert signatures through the editor parser once, without overwriting
+  // saved draft bodies or text typed before asynchronous data was ready.
   useEffect(() => {
-    if (!editor || !initialized) return;
-    const html = existingDraft?.html ?? "";
-    if (html && !editor.getText().trim()) {
-      editor.commands.setContent(html, { emitUpdate: false });
-      htmlRef.current = existingDraft?.html ?? "";
-      textRef.current = existingDraft?.text ?? "";
+    if (!editor || !initialized || bodyInitializedRef.current || accounts.length === 0) return;
+    bodyInitializedRef.current = true;
+    if (!editor.getText().trim()) {
+      const account = composeAccount(accounts, accountId, defaultAccountId);
+      const html = initialComposeBody(win.mode, existingDraft?.html, account?.signatureHtml);
+      if (html) editor.commands.setContent(html, { emitUpdate: false });
     }
-  }, [editor, initialized, existingDraft]);
+    htmlRef.current = editor.getHTML();
+    textRef.current = editor.getText();
+  }, [editor, initialized, existingDraft, accounts, accountId, defaultAccountId, win.mode]);
 
   const onFieldChange = () => queueSave();
 

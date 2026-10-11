@@ -27,6 +27,7 @@ export interface AccountInfo {
   id: string;
   email: string;
   displayName?: string;
+  signatureHtml?: string;
   status: string;
   lastError?: string;
   unread?: number;

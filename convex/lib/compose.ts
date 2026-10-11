@@ -20,6 +20,21 @@ export function replyRecipients(
   replyAll: boolean,
   ownerEmails: string[],
 ): { to: Address[]; cc: Address[] } {
+  if (isOwner(original.from.email, ownerEmails)) {
+    const seen = new Set<string>();
+    const recipients = (addresses: Address[]) => addresses.filter(address => {
+      const email = normalizeEmail(address.email);
+      if (isOwner(email, ownerEmails) || seen.has(email)) return false;
+      seen.add(email);
+      return true;
+    });
+    const to = recipients(original.to);
+    const cc = recipients(original.cc);
+    // Sent mail replies continue the conversation with its recipients, never
+    // the owner's From/Reply-To address. Cc is a fallback for To-only-self mail.
+    if (to.length === 0) return { to: cc, cc: [] };
+    return { to, cc: replyAll ? cc : [] };
+  }
   const to: Address[] =
     original.replyTo.length > 0 ? [...original.replyTo] : [original.from];
   if (!replyAll) return { to, cc: [] };

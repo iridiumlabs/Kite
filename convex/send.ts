@@ -320,6 +320,7 @@ async function executeSend(
     };
   },
 ): Promise<SendOutcome> {
+  if (args.to.length + args.cc.length + args.bcc.length === 0) throw new Error("Add at least one recipient before sending");
   const text = args.text ?? (args.html ? htmlToText(args.html) : "");
   const estBytes = args.attachmentForHash.reduce((s, a) => s + a.size, 0);
   if (estBytes > ATTACHMENT_TOTAL_MAX) {

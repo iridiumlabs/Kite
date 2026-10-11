@@ -44,6 +44,28 @@ test("shared draft quoting preserves both alternatives and escapes plaintext ori
 });
 
 describe("replyRecipients", () => {
+  test("Reply from Sent uses original To recipients, not the owner sender", () => {
+    const r = replyRecipients(original({
+      from: { email: "ME@x.com" }, replyTo: [{ email: "alt@x.com" }],
+      to: [{ email: "me@x.com" }, { email: "bob@x.com" }, { email: "BOB@x.com" }],
+    }), false, OWNER);
+    expect(r).toEqual({ to: [{ email: "bob@x.com" }], cc: [] });
+  });
+
+  test("Reply-all from Sent preserves non-owner Cc recipients without duplicates", () => {
+    const r = replyRecipients(original({
+      from: { email: "alt@x.com" },
+      to: [{ email: "bob@x.com" }],
+      cc: [{ email: "bob@x.com" }, { email: "carol@x.com" }, { email: "me@x.com" }],
+    }), true, OWNER);
+    expect(r).toEqual({ to: [{ email: "bob@x.com" }], cc: [{ email: "carol@x.com" }] });
+  });
+
+  test("outbound mail addressed only to the owner falls back to non-owner Cc", () => {
+    const r = replyRecipients(original({ from: { email: "me@x.com" }, to: [{ email: "alt@x.com" }] }), false, OWNER);
+    expect(r.to).toEqual([{ email: "carol@x.com" }]);
+  });
+
   test("reply goes to From", () => {
     const r = replyRecipients(original(), false, OWNER);
     expect(r.to).toEqual([{ name: "Ada", email: "ada@x.com" }]);

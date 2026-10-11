@@ -97,6 +97,7 @@ function toAccountInfo(a: Doc<"accounts">, unread?: number): AccountInfo {
     id: a._id,
     email: a.email,
     displayName: a.displayName,
+    signatureHtml: a.signatureHtml,
     status: a.status,
     lastError: a.lastError,
     unread,

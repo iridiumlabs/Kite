@@ -11,8 +11,8 @@ import { decryptCredentials } from "./crypto";
 import { rewriteCidReferences, blockRemoteImages } from "../lib/html";
 import { splitHtmlQuote, splitTextQuote } from "../lib/quoteSplit";
 import type { ParsedMail } from "../lib/ports";
+import { checkReceivedAttachmentSize } from "../lib/attachmentLimits";
 
-const ATTACHMENT_MAX = 20 * 1024 * 1024;
 const INLINE_CID_MAX = 3 * 1024 * 1024;
 
 const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
@@ -251,9 +251,7 @@ export const fetchAttachmentData = internalAction({
         (a) => a.id === args.attachmentId || a.cid === args.attachmentId,
       );
       if (!att || !att.content) throw new Error("Attachment not found");
-      if (att.content.length > ATTACHMENT_MAX) {
-        throw new Error("Attachment is too large to download.");
-      }
+      checkReceivedAttachmentSize(att.content.length);
       return new Uint8Array(att.content).buffer as ArrayBuffer;
     } finally {
       await close();
@@ -278,9 +276,7 @@ export const downloadAttachment = internalAction({
         (a) => a.id === args.attachmentId || a.cid === args.attachmentId,
       );
       if (!att || !att.content) throw new Error("Attachment not found");
-      if (att.content.length > ATTACHMENT_MAX) {
-        throw new Error("Attachment is too large to download.");
-      }
+      checkReceivedAttachmentSize(att.content.length);
       return {
         filename: att.filename,
         contentType: att.contentType,
