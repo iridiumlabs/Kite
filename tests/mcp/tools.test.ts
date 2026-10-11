@@ -442,6 +442,19 @@ describe("write tools", () => {
     expect(a.idempotencyKey).toBe("key-1");
   });
 
+  it("sending tools expose partial-delivery recipients rather than reporting full success", async () => {
+    const send = backend.sendMessage; const draft = backend.sendDraft;
+    try {
+      backend.sendMessage = async () => ({ messageId: "m-sent", deduped: false, rejectedRecipients: ["rejected@example.com"] });
+      backend.sendDraft = async () => ({ messageId: "m-dsent", deduped: true, rejectedRecipients: ["rejected@example.com"] });
+      const sent = sc(await client.callTool({ name: "send_email", arguments: { fromEmail: "me@example.com", to: ["ok@example.com", "rejected@example.com"], subject: "Partial" } }));
+      expect(sent.rejectedRecipients).toEqual(["rejected@example.com"]);
+      const retried = sc(await client.callTool({ name: "send_draft", arguments: { draftId: "d1", idempotencyKey: "same" } }));
+      expect(retried.rejectedRecipients).toEqual(["rejected@example.com"]);
+      expect(retried.deduplicated).toBe(true);
+    } finally { backend.sendMessage = send; backend.sendDraft = draft; }
+  });
+
   it("send_email resolves a missing account to an error", async () => {
     const res = await client.callTool({
       name: "send_email",

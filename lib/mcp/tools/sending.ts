@@ -20,6 +20,7 @@ async function sendOutcome(
   threadId: string | null;
   sentAt: string | null;
   deduplicated: boolean;
+  rejectedRecipients?: string[];
 }> {
   let threadId: string | null = null;
   let sentAt: string | null = null;
@@ -37,6 +38,7 @@ async function sendOutcome(
     threadId,
     sentAt,
     deduplicated: res.deduped,
+    ...(res.rejectedRecipients?.length ? { rejectedRecipients: res.rejectedRecipients } : {}),
   };
 }
 

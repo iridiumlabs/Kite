@@ -268,7 +268,9 @@ export async function runAccountSync(deps: EngineDeps): Promise<SyncOutcome> {
       for (const meta of metas) newRefs.push({ folder, meta });
     }
     if (plan.detectVanished) {
-      const serverUids = new Set(await imap.searchUids(folder.path));
+      const serverUids = new Set(await imap.searchUids(folder.path,
+        !folder.backfillDone && fs.oldestUid !== undefined ? { minUid: fs.oldestUid } : undefined,
+      ));
       const storedUids = [...iter(fs.synced)];
       const vanishedUids = storedUids.filter((u) => !serverUids.has(u));
       if (vanishedUids.length > 0) {

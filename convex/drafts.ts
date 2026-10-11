@@ -334,7 +334,7 @@ export const scheduleSend = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
     const draft = await ownedDraft(ctx, userId, args.draftId);
-    if (draft.to.length === 0) {
+    if (draft.to.length + draft.cc.length + draft.bcc.length === 0) {
       throw new Error("Add at least one recipient before scheduling");
     }
     if (draft.scheduledJobId) {

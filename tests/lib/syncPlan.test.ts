@@ -119,6 +119,16 @@ describe("planFolderSync", () => {
     expect(plan.detectVanished).toBe(true);
   });
 
+  test.each([CAPS, NO_CAPS])("an unchanged partially loaded mailbox does not plan vanished scans", caps => {
+    const s = stored({ syncedUids: "49701-50000", oldestUid: 49701, backfillDone: false, messages: 50000, uidNext: 50001 });
+    expect(planFolderSync(s, status({ messages: 50000, uidNext: 50001 }), caps, NOW).kind).toBe("skip");
+    const later = planFolderSync(s, status({ messages: 50000, uidNext: 50001 }), caps, NOW + FLAGS_FULL_INTERVAL_MS + 1);
+    expect(later.kind).toBe("incremental");
+    if (later.kind === "incremental") expect(later.detectVanished).toBe(false);
+    const deleted = planFolderSync(s, status({ messages: 49999, uidNext: 50001 }), caps, NOW);
+    if (deleted.kind === "incremental") expect(deleted.detectVanished).toBe(true);
+  });
+
   test("message count mismatch triggers vanished detection", () => {
     const plan = planFolderSync(
       stored(),

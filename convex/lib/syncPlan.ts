@@ -85,8 +85,11 @@ export function planFolderSync(
   // Anything that makes the stored UID set suspect triggers a UID SEARCH:
   // a message count that cannot be explained by arrivals alone, or any new
   // arrivals (cheap insurance against add+expunge in the same window).
+  // An incomplete backfill tracks only a window. Compare mailbox totals
+  // with the previous STATUS total, not the number of loaded messages.
+  const previousCount = stored.backfillDone ? syncedCount : (stored.messages ?? status.messages - newUids);
   const detectVanished =
-    status.messages !== syncedCount + newUids || newUids > 0;
+    status.messages !== previousCount + newUids || newUids > 0;
 
   let flagMode: "condstore" | "full" | "none" = "none";
   let flagsSinceModseq: string | undefined;

@@ -804,6 +804,32 @@ export const linkRemoteDraft = internalMutation({
   },
 });
 
+export const materializeDraftAttachments = internalMutation({
+  args: {
+    draftId: v.id("drafts"), accountId: v.id("accounts"), allowSending: v.optional(v.boolean()),
+    uploads: v.array(v.object({ messageId: v.id("messages"), attachmentId: v.string(), storageId: v.id("_storage"), size: v.number() })),
+  },
+  handler: async (ctx, args) => {
+    const draft = await ctx.db.get(args.draftId);
+    const used = new Set<Id<"_storage">>();
+    if (draft && draft.status !== "uncertain" && (draft.status !== "sending" || args.allowSending)) {
+      const attachments = draft.attachments.map(att => {
+        if (att.kind !== "forward") return att;
+        const upload = args.uploads.find(u => u.messageId === att.messageId && u.attachmentId === att.attachmentId);
+        if (!upload) return att;
+        used.add(upload.storageId);
+        return { kind: "upload" as const, storageId: upload.storageId, filename: att.filename, contentType: att.contentType, size: upload.size };
+      });
+      // Preserve edits made during download, including added/removed files.
+      await ctx.db.patch(draft._id, { attachments });
+    }
+    for (const upload of args.uploads) if (!used.has(upload.storageId)) await ctx.storage.delete(upload.storageId);
+    // Preserve downloaded bytes even if the user switched accounts, but do
+    // not let the old account connection push the replacement draft.
+    return used.size && draft?.accountId === args.accountId ? await ctx.db.get(args.draftId) : null;
+  },
+});
+
 export const markDraftPushed = internalMutation({
   args: {
     draftId: v.id("drafts"),

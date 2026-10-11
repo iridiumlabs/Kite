@@ -639,7 +639,7 @@ function ComposePane({
       toast.error(draftSendProblem(existingDraft) ?? "Draft is already sending");
       return;
     }
-    if (to.length === 0) {
+    if (to.length + cc.length + bcc.length === 0) {
       toast.error("Add a recipient first");
       return;
     }
@@ -647,7 +647,7 @@ function ComposePane({
       toast.error("Wait for attachments to finish uploading");
       return;
     }
-    if (to.some((c) => c.invalid)) {
+    if ([...to, ...cc, ...bcc].some((c) => c.invalid)) {
       toast.error("Fix invalid addresses");
       return;
     }
@@ -684,7 +684,7 @@ function ComposePane({
       toast.error(draftSendProblem(existingDraft) ?? "Draft is already sending");
       return;
     }
-    if (to.length === 0) {
+    if (to.length + cc.length + bcc.length === 0) {
       toast.error("Add a recipient first");
       return;
     }

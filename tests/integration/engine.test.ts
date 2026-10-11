@@ -2,7 +2,7 @@
 // fake implementing the real ImapPort contract (no sockets, so it runs in
 // the edge-runtime test environment); the store side is the real Convex
 // schema, mutations and queries executed via convex-test.
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "../../convex/schema";
 import { internal, api } from "../../convex/_generated/api";
@@ -1003,6 +1003,22 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     expect(after.oldestUid).toBe(701);
     expect(after.backfillDone).toBe(false);
     expect((await allMessages(t)).length).toBe(300);
+  });
+
+  test("incomplete backfills skip unchanged UID searches and bound deletion scans to the loaded window", async () => {
+    const { t, accountId, imap, deps, now } = await world();
+    for (let i = 0; i < 1000; i++) imap.mailbox("INBOX").append(mailSource({ id: `window-${i}@t` }));
+    await runAccountSync(deps);
+    const search = vi.spyOn(imap, "searchUids");
+    await runAccountSync(deps);
+    now.t += 11 * 60 * 1000;
+    await runAccountSync(deps);
+    expect(search.mock.calls.filter(([path]) => path === "INBOX")).toHaveLength(0);
+    imap.mailbox("INBOX").messages.delete(1000);
+    await runAccountSync(deps);
+    expect(search).toHaveBeenCalledWith("INBOX", { minUid: 701 });
+    expect((await folderByRole(t, accountId, "inbox")).syncedUids).toBe("701-999");
+    expect(await allMessages(t)).toHaveLength(299);
   });
 
   test("a permanent deletion expunges remote mail after local records disappear", async () => {

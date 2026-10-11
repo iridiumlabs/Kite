@@ -9,7 +9,8 @@ import {
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { requireUserId } from "./model/auth";
-import { ingestMessage } from "./model/ingest";
+import { ingestMessage, buildSearchText } from "./model/ingest";
+import { recomputeThread } from "./model/threads";
 import { enqueueOp } from "./model/pendingOps";
 import { addressV } from "./validators";
 import {
@@ -110,6 +111,7 @@ export const completeSend = internalMutation({
     to: v.array(addressV),
     cc: v.array(addressV),
     bcc: v.array(addressV),
+    rejectedRecipients: v.optional(v.array(v.string())),
     text: v.string(),
     attachments: v.array(
       v.object({
@@ -125,7 +127,7 @@ export const completeSend = internalMutation({
     const log = await ctx.db.get(args.sendLogId);
     if (!log) throw new Error("Send log not found");
     if (log.status === "sent" && log.messageId) {
-      return { messageId: log.messageId, deduped: true };
+      return { messageId: log.messageId, deduped: true, ...(log.rejectedRecipients?.length ? { rejectedRecipients: log.rejectedRecipients } : {}) };
     }
 
     const inserted = await ingestMessage(ctx, {
@@ -152,6 +154,16 @@ export const completeSend = internalMutation({
       hasAttachments: args.attachments.length > 0,
       attachments: args.attachments.slice(0, 25),
     });
+
+    if (args.rejectedRecipients?.length) {
+      // A sync may have ingested the raw Sent headers before completion.
+      // Record only accepted envelope recipients in the local delivery record.
+      await ctx.db.patch(inserted.messageId, {
+        to: args.to, cc: args.cc, bcc: args.bcc,
+        searchText: buildSearchText({ ...args, snippet: args.text.slice(0, 240) }),
+      });
+      await recomputeThread(ctx, inserted.threadId);
+    }
 
     if (args.replyToMessageDocId) {
       const original = await ctx.db.get(args.replyToMessageDocId);
@@ -184,7 +196,7 @@ export const completeSend = internalMutation({
       const draft = await ctx.db.get(args.draftId);
       if (draft) {
         for (const att of draft.attachments) {
-          if (att.kind === "upload") {
+          if (!args.rejectedRecipients?.length && att.kind === "upload") {
             await ctx.storage.delete(att.storageId).catch(() => {});
           }
         }
@@ -199,15 +211,33 @@ export const completeSend = internalMutation({
             });
           }
         }
-        await ctx.db.delete(args.draftId);
-        const counter = await ctx.db
-          .query("counters")
-          .withIndex("by_user_key", (q) =>
-            q.eq("userId", draft.userId).eq("key", "drafts"),
-          )
-          .first();
-        if (counter && counter.count > 0) {
-          await ctx.db.patch(counter._id, { count: counter.count - 1 });
+        if (args.rejectedRecipients?.length) {
+          const rejected = new Set(args.rejectedRecipients.map(email => email.toLowerCase()));
+          const account = await ctx.db.get(draft.accountId);
+          const jobAt = Date.now() + 30_000;
+          await ctx.db.patch(draft._id, {
+            to: draft.to.filter(a => rejected.has(a.email.toLowerCase())),
+            cc: draft.cc.filter(a => rejected.has(a.email.toLowerCase())),
+            bcc: draft.bcc.filter(a => rejected.has(a.email.toLowerCase())),
+            status: "failed",
+            sendError: `Partially delivered. Not accepted: ${args.rejectedRecipients.join(", ")}. This draft contains only undelivered recipients.`.slice(0, 500),
+            sendErrorAt: Date.now(), updatedAt: Date.now(),
+            messageIdHeader: newMessageId(account?.email ?? args.from.email),
+            remoteUid: undefined, remoteFolderId: undefined,
+            remoteDirty: true, pushScheduledAt: jobAt,
+          });
+          await ctx.scheduler.runAt(jobAt, internal.node.draftsOps.pushDraftNow, { draftId: draft._id });
+        } else {
+          await ctx.db.delete(args.draftId);
+          const counter = await ctx.db
+            .query("counters")
+            .withIndex("by_user_key", (q) =>
+              q.eq("userId", draft.userId).eq("key", "drafts"),
+            )
+            .first();
+          if (counter && counter.count > 0) {
+            await ctx.db.patch(counter._id, { count: counter.count - 1 });
+          }
         }
       }
     }
@@ -215,8 +245,9 @@ export const completeSend = internalMutation({
     await ctx.db.patch(args.sendLogId, {
       status: "sent",
       messageId: inserted.messageId,
+      rejectedRecipients: args.rejectedRecipients,
     });
-    return { messageId: inserted.messageId, deduped: false };
+    return { messageId: inserted.messageId, deduped: false, ...(args.rejectedRecipients?.length ? { rejectedRecipients: args.rejectedRecipients } : {}) };
   },
 });
 
@@ -288,6 +319,7 @@ interface SendOutcome {
   sendLogId: Id<"sendLog">;
   messageId: Id<"messages"> | undefined;
   deduped: boolean;
+  rejectedRecipients?: string[];
 }
 
 async function executeSend(
@@ -393,6 +425,7 @@ async function executeSend(
       sendLogId: existing._id,
       messageId: existing.messageId,
       deduped: true,
+      ...(existing.rejectedRecipients?.length ? { rejectedRecipients: existing.rejectedRecipients } : {}),
     };
   }
   const sendLogId = begin.sendLogId;
@@ -401,6 +434,7 @@ async function executeSend(
     const res: {
       messageId: Id<"messages"> | undefined;
       deduped: boolean;
+      rejectedRecipients?: string[];
     } = await ctx.runAction(internal.node.sendOps.performSend, {
       accountId: args.accountId,
       sendLogId,
@@ -417,7 +451,7 @@ async function executeSend(
       messageIdHeader,
       attachments: args.performArgs.attachments,
     });
-    return { sendLogId, messageId: res.messageId, deduped: res.deduped };
+    return { sendLogId, messageId: res.messageId, deduped: res.deduped, ...(res.rejectedRecipients?.length ? { rejectedRecipients: res.rejectedRecipients } : {}) };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Send failed";
     await ctx.runMutation(internal.send.failSend, {

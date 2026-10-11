@@ -196,7 +196,7 @@ export function registerDraftTools(server: McpServer, getBackend: BackendFor) {
     {
       title: "Send draft",
       description:
-        "Sends a draft over SMTP right now, or schedules it for later when scheduledAt (ISO 8601) is given. Sending deletes the draft locally and from the server Drafts folder. Pass a unique idempotencyKey for retry safety.",
+        "Sends a draft over SMTP right now, or schedules it for later when scheduledAt (ISO 8601) is given. Full delivery deletes the draft. Partial delivery retains only rejected recipients for retry and reports them in rejectedRecipients; never retry accepted recipients. Pass a unique idempotencyKey for retry safety.",
       inputSchema: z.object({
         draftId: z.string(),
         idempotencyKey: zIdempotency.idempotencyKey,
@@ -211,6 +211,7 @@ export function registerDraftTools(server: McpServer, getBackend: BackendFor) {
         threadId: z.string().nullable(),
         sentAt: z.string().nullable(),
         deduplicated: z.boolean(),
+        rejectedRecipients: z.array(z.string()).optional(),
         scheduledAt: z.string().optional(),
         scheduled: z.boolean().optional(),
       }),
@@ -253,6 +254,7 @@ export function registerDraftTools(server: McpServer, getBackend: BackendFor) {
         threadId,
         sentAt,
         deduplicated: res.deduped,
+        ...(res.rejectedRecipients?.length ? { rejectedRecipients: res.rejectedRecipients } : {}),
       };
     },
   );

@@ -239,6 +239,7 @@ export const zListOut = <T extends z.ZodTypeAny>(item: T) =>
   });
 
 export const zSendResult = z.object({
+  rejectedRecipients: z.array(z.string()).optional().describe("Partial delivery: these recipients were rejected. Do not retry recipients who already received the message."),
   messageId: z.string().nullable(),
   threadId: z.string().nullable(),
   sentAt: z.string().nullable(),

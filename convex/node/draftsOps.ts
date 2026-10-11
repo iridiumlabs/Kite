@@ -7,6 +7,7 @@ import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import { connectImap, FlowPort, accountToImapConfig } from "./imap";
 import { decryptCredentials } from "./crypto";
 import type { Doc } from "../_generated/dataModel";
+import { materializeDraftAttachments } from "./draftAttachments";
 
 async function buildDraftSource(
   ctx: Pick<ActionCtx, "runQuery" | "runAction" | "storage">,
@@ -21,7 +22,7 @@ async function buildDraftSource(
   for (const att of draft.attachments) {
     if (att.kind === "upload") {
       const blob = await ctx.storage.get(att.storageId);
-      if (!blob) continue;
+      if (!blob) throw new Error("Draft attachment upload not found");
       attachments.push({
         filename: att.filename,
         contentType: att.contentType,
@@ -82,7 +83,7 @@ export const pushDraftNow = internalAction({
 export const pushDraftUnderLease = internalAction({
   args: { draftId: v.id("drafts") },
   handler: async (ctx, args): Promise<{ uid: number | undefined }> => {
-    const draft: Doc<"drafts"> | null = await ctx.runQuery(
+    let draft: Doc<"drafts"> | null = await ctx.runQuery(
       internal.syncStore.draftById,
       { draftId: args.draftId },
     );
@@ -100,6 +101,8 @@ export const pushDraftUnderLease = internalAction({
     const client = await connectImap({ ...cfg, username, password });
     try {
       const port = new FlowPort(client);
+      draft = await materializeDraftAttachments(ctx, draft);
+      if (!draft) return { uid: undefined };
       const source = await buildDraftSource(ctx, draft, account);
       const draftsState = await ctx.runQuery(
         internal.syncStore.folderByRole,

@@ -2,6 +2,7 @@
 
 import { v } from "convex/values";
 import { isDefiniteSmtpFailure } from "../lib/smtpFailure";
+import { smtpDelivery } from "../lib/smtpDelivery";
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
@@ -57,6 +58,7 @@ export const performSend = internalAction({
   ): Promise<{
     messageId: Id<"messages"> | undefined;
     deduped: boolean;
+    rejectedRecipients?: string[];
   }> => {
     const account = await ctx.runQuery(
       internal.syncStore.getAccountDoc,
@@ -111,6 +113,31 @@ export const performSend = internalAction({
       throw new Error("Attachments exceed the 25 MB limit.");
     }
 
+    // Capture forwarded bytes on the locked draft before SMTP. A partial
+    // delivery may keep the draft but delete its old remote draft copy.
+    if (args.draftId) {
+      const uploads: { messageId: Id<"messages">; attachmentId: string; storageId: Id<"_storage">; size: number }[] = [];
+      let submitted = false;
+      try {
+        for (const [i, att] of (args.attachments ?? []).entries()) {
+          if (!("messageId" in att)) continue;
+          const bytes = Uint8Array.from(attachments[i].content);
+          const storageId = await ctx.storage.store(new Blob([bytes], { type: attachments[i].contentType }));
+          uploads.push({ messageId: att.messageId, attachmentId: att.attachmentId, storageId, size: bytes.byteLength });
+        }
+        if (uploads.length) {
+          submitted = true;
+          const draft = await ctx.runMutation(internal.syncStore.materializeDraftAttachments, {
+            draftId: args.draftId, accountId: args.accountId, uploads, allowSending: true,
+          });
+          if (!draft) throw new Error("Draft attachments could not be preserved");
+        }
+      } catch (error) {
+        if (!submitted) for (const upload of uploads) await ctx.storage.delete(upload.storageId);
+        throw error;
+      }
+    }
+
     const headers: Record<string, string> = {};
     if (args.inReplyTo) headers["In-Reply-To"] = `<${args.inReplyTo}>`;
     if (args.references && args.references.length > 0) {
@@ -148,18 +175,20 @@ export const performSend = internalAction({
       username,
       password,
     });
+    let delivery: ReturnType<typeof smtpDelivery>;
     try {
       await ctx.runMutation(internal.send.markSendUncertain, {
         sendLogId: args.sendLogId,
         draftId: args.draftId,
       });
-      await transport.sendMail({
+      const result = await transport.sendMail({
         envelope: {
           from: account.email,
           to: [...to, ...cc, ...bcc].map((a) => a.email),
         },
         raw: source,
       });
+      delivery = smtpDelivery(result, [...to, ...cc, ...bcc]);
     } catch (error) {
       // Release only proven non-delivery; generic socket errors/timeouts can
       // hide acceptance after DATA and must keep their reservation.
@@ -232,9 +261,10 @@ export const performSend = internalAction({
       references: args.references ?? [],
       subject: args.subject,
       from: { name: account.displayName, email: account.email },
-      to: to as never,
-      cc: cc as never,
-      bcc: bcc as never,
+      to: to.filter(a => delivery.accepted.includes(a)),
+      cc: cc.filter(a => delivery.accepted.includes(a)),
+      bcc: bcc.filter(a => delivery.accepted.includes(a)),
+      rejectedRecipients: delivery.rejected.map(a => a.email),
       text: args.text ?? "",
       attachments: attachments.map((a, i) => ({
         id: `a${i}`,

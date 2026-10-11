@@ -92,6 +92,7 @@ export interface ForwardArgs {
 export interface SendResult {
   messageId?: string;
   deduped: boolean;
+  rejectedRecipients?: string[];
 }
 
 export interface ThreadTargets {

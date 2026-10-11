@@ -335,6 +335,7 @@ export default defineSchema({
     messageIdHeader: v.string(),
     messageId: v.optional(v.id("messages")),
     error: v.optional(v.string()),
+    rejectedRecipients: v.optional(v.array(v.string())),
     createdAt: v.number(),
   })
     .index("by_user_key", ["userId", "idempotencyKey"])
