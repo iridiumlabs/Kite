@@ -445,17 +445,19 @@ export class FlowPort implements ImapPort {
     const range = this.uidSetString(uids);
     const lock = await this.client.getMailboxLock(path);
     try {
-      if (canMove) {
+      if (canMove && this.client.capabilities.has("MOVE")) {
         const res = await this.client.messageMove(range, targetPath, {
           uid: true,
         });
-        return res && res.uidMap ? res.uidMap : new Map();
+        if (!res) throw new Error("IMAP move failed");
+        return res.uidMap ?? new Map();
       }
       const res = await this.client.messageCopy(range, targetPath, {
         uid: true,
       });
-      await this.client.messageDelete(range, { uid: true });
-      return res && res.uidMap ? res.uidMap : new Map();
+      if (!res) throw new Error("IMAP copy failed");
+      await this.deleteSelectedUids(uids);
+      return res.uidMap ?? new Map();
     } finally {
       lock.release();
     }
@@ -466,18 +468,44 @@ export class FlowPort implements ImapPort {
     uids: number[],
     useUidPlus: boolean,
   ): Promise<void> {
+    // Saved capability hints may be stale; use this live connection instead.
+    void useUidPlus;
     if (uids.length === 0) return;
     const lock = await this.client.getMailboxLock(path);
     try {
-      const range = this.uidSetString(uids);
-      if (!useUidPlus) {
-        // Without UIDPLUS a plain EXPUNGE clears every \Deleted message in
-        // the mailbox, so flag the targets explicitly first.
-        await this.client.messageFlagsAdd(range, ["\\Deleted"], {
-          uid: true,
-        });
-      }
-      await this.client.messageDelete(range, { uid: true });
+      await this.deleteSelectedUids(uids);
+    } finally {
+      lock.release();
+    }
+  }
+
+  // Called only while holding the selected mailbox lock. RFC 4315 fallback:
+  // plain EXPUNGE must not remove other clients' already-deleted messages.
+  private async deleteSelectedUids(uids: number[]): Promise<void> {
+    const range = this.uidSetString(uids);
+    if (this.client.capabilities.has("UIDPLUS")) {
+      if (await this.client.messageDelete(range, { uid: true }) !== true) throw new Error("IMAP deletion failed");
+      return;
+    }
+    const deleted = await this.client.search({ deleted: true }, { uid: true });
+    if (!Array.isArray(deleted)) throw new Error("Could not identify deleted messages safely");
+    const targets = new Set(uids);
+    const protectedUids = deleted.filter(uid => !targets.has(uid));
+    const protectedRange = this.uidSetString(protectedUids);
+    try {
+      if (protectedUids.length && await this.client.messageFlagsRemove(protectedRange, ["\\Deleted"], { uid: true }) !== true) throw new Error("Could not protect unrelated deleted messages");
+      if (await this.client.messageDelete(range, { uid: true }) !== true) throw new Error("IMAP deletion failed");
+    } finally {
+      if (protectedUids.length && await this.client.messageFlagsAdd(protectedRange, ["\\Deleted"], { uid: true }) !== true) throw new Error("Could not restore deleted flags");
+    }
+  }
+
+  async searchHeader(path: string, header: string, value: string): Promise<number[]> {
+    const lock = await this.client.getMailboxLock(path);
+    try {
+      const matches = await this.client.search({ header: { [header]: value } }, { uid: true });
+      if (!Array.isArray(matches)) throw new Error("Could not reconcile appended message");
+      return matches;
     } finally {
       lock.release();
     }
@@ -495,7 +523,8 @@ export class FlowPort implements ImapPort {
       flags,
       date,
     );
-    return { uid: res ? res.uid : undefined };
+    if (!res) throw new Error("IMAP APPEND failed");
+    return { uid: res.uid };
   }
 
   async createMailbox(path: string): Promise<void> {

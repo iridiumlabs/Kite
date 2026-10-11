@@ -96,22 +96,23 @@ export const retryBatch = internalAction({
     const parser = new MailParserPort();
     let retried = 0;
     for (const [accountId, items] of byAccount) {
-      const secret = await ctx.runQuery(internal.syncStore.getSecret, {
-        accountId,
-      });
-      const state = await ctx.runQuery(internal.syncStore.getAccountSyncState, {
-        accountId,
-      });
-      if (!secret || !state) continue;
-      const { username, password } = decryptCredentials(secret);
-      const imap = await connectImap({
-        host: state.account.imapHost,
-        port: state.account.imapPort,
-        secure: state.account.imapSecure,
-        username,
-        password,
-      });
+      let imap: Awaited<ReturnType<typeof connectImap>> | undefined;
       try {
+        const secret = await ctx.runQuery(internal.syncStore.getSecret, {
+          accountId,
+        });
+        const state = await ctx.runQuery(internal.syncStore.getAccountSyncState, {
+          accountId,
+        });
+        if (!secret || !state) throw new Error("Mailbox unavailable");
+        const { username, password } = decryptCredentials(secret);
+        imap = await connectImap({
+          host: state.account.imapHost,
+          port: state.account.imapPort,
+          secure: state.account.imapSecure,
+          username,
+          password,
+        });
         // Retry against the ingest-time category descriptions, not categories
         // added or edited since the message arrived.
         const port = new FlowPort(imap);
@@ -216,8 +217,17 @@ export const retryBatch = internalAction({
             updates,
           });
         }
+      } catch {
+        // Advance the entire failed account group so it cannot monopolize the
+        // globally bounded retry queue. Preserve the existing classification.
+        await ctx.runMutation(internal.syncStore.applyClassification, {
+          updates: items.map(item => ({
+            messageId: item._id, categoryIds: [], classifiedBy: "heuristic" as const,
+            needsClassification: true, classifyAttempts: item.classifyAttempts + 1,
+          })),
+        });
       } finally {
-        await imap.logout().catch(() => imap.close());
+        if (imap) await imap.logout().catch(() => imap!.close());
       }
     }
     return { retried };

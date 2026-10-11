@@ -2,6 +2,7 @@
 // API key to the same public functions the UI uses; nothing here adds
 // business logic beyond argument mapping.
 import { ConvexHttpClient } from "convex/browser";
+import { uploadSendAttachments } from "./uploadAttachments";
 import type {
   AccountDoc,
   AddressIn,
@@ -181,6 +182,8 @@ export interface PostBackend {
   scheduleDraft(draftId: string, at: number): Promise<void>;
   cancelScheduledDraft(draftId: string): Promise<void>;
   uncertainDraftAttempts(draftId: string): Promise<{ sendLogId: string; messageIdHeader: string; createdAt: number; canConfirmDelivered: boolean; canConfirmNotDelivered: boolean }[]>;
+  uncertainAccountAttempts(accountId: string): ReturnType<PostBackend["uncertainDraftAttempts"]>;
+  resolveUncertainSend(args: { sendLogId: string; outcome: "delivered" | "notDelivered"; confirmed: true }): Promise<{ outcome: "delivered" | "notDelivered" }>;
   resolveUncertainDraft(args: { draftId: string; sendLogId: string; outcome: "delivered" | "notDelivered"; confirmed: true }): Promise<{ outcome: "delivered" | "notDelivered" }>;
 
   setRead(targets: ThreadTargets, read: boolean): Promise<void>;
@@ -282,10 +285,10 @@ export function convexBackend(apiKey: string, convexUrl: string): PostBackend {
       }>,
     counts: () => query("mail:counts", {}) as Promise<Record<string, number>>,
 
-    sendMessage: (a) =>
-      action("send:sendMessage", a as never) as Promise<SendResult>,
-    reply: (a) => action("send:reply", a as never) as Promise<SendResult>,
-    forward: (a) => action("send:forward", a as never) as Promise<SendResult>,
+    sendMessage: async (a) =>
+      action("send:sendMessage", { ...a, attachments: await uploadSendAttachments(a.attachments, apiKey, convexUrl) }) as Promise<SendResult>,
+    reply: async (a) => action("send:reply", { ...a, attachments: await uploadSendAttachments(a.attachments, apiKey, convexUrl) }) as Promise<SendResult>,
+    forward: async (a) => action("send:forward", { ...a, attachments: await uploadSendAttachments(a.attachments, apiKey, convexUrl) }) as Promise<SendResult>,
     sendDraft: (a) => action("send:sendDraft", a as never) as Promise<SendResult>,
 
     listDrafts: async (a) => {
@@ -309,6 +312,8 @@ export function convexBackend(apiKey: string, convexUrl: string): PostBackend {
       mutation("drafts:scheduleSend", { draftId, at }) as Promise<void>,
     cancelScheduledDraft: draftId => mutation("drafts:cancelScheduledSend", { draftId }) as Promise<void>,
     uncertainDraftAttempts: draftId => query("send:uncertainDraftAttempts", { draftId }) as ReturnType<PostBackend["uncertainDraftAttempts"]>,
+    uncertainAccountAttempts: accountId => query("send:uncertainAccountAttempts", { accountId }) as ReturnType<PostBackend["uncertainAccountAttempts"]>,
+    resolveUncertainSend: args => mutation("send:resolveUncertainSend", args) as ReturnType<PostBackend["resolveUncertainSend"]>,
     resolveUncertainDraft: args => mutation("send:resolveUncertainDraft", args) as ReturnType<PostBackend["resolveUncertainDraft"]>,
 
     setRead: (t, read) => mutation("mail:setRead", { ...t, read }) as Promise<void>,

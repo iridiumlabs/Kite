@@ -36,6 +36,7 @@ const EXPECTED_TOOLS = [
   "cancel_scheduled_send",
   "list_uncertain_send_attempts",
   "resolve_uncertain_draft",
+  "resolve_uncertain_send",
   "mark_read",
   "mark_unread",
   "star",
@@ -225,6 +226,8 @@ function makeBackend(): PostBackend & {
     discardDraft: rec("discardDraft", async () => {}),
     scheduleDraft: rec("scheduleDraft", async () => {}),
     cancelScheduledDraft: rec("cancelScheduledDraft", async () => {}),
+    uncertainAccountAttempts: rec("uncertainAccountAttempts", async () => []),
+    resolveUncertainSend: rec("resolveUncertainSend", async (args: { outcome: "delivered" | "notDelivered" }) => ({ outcome: args.outcome })),
     uncertainDraftAttempts: rec("uncertainDraftAttempts", async () => []),
     resolveUncertainDraft: rec("resolveUncertainDraft", async (args: { outcome: "delivered" | "notDelivered" }) => ({ outcome: args.outcome })),
     setRead: rec("setRead", async () => {}),
@@ -468,6 +471,16 @@ describe("write tools", () => {
     const resolved = await client.callTool({ name: "resolve_uncertain_draft", arguments: { draftId: "d1", sendLogId: "log", outcome: "notDelivered", confirmed: true } });
     expect(sc(resolved)).toEqual({ outcome: "notDelivered" });
     expect(backend.calls.find(c => c.m === "resolveUncertainDraft")!.args[0]).toEqual({ draftId: "d1", sendLogId: "log", outcome: "notDelivered", confirmed: true });
+  });
+
+  it("draftless uncertain send tools require confirmation and support account lookup", async () => {
+    const list = await client.callTool({ name: "list_uncertain_send_attempts", arguments: { accountId: "a1" } });
+    expect(list.isError).not.toBe(true);
+    expect(backend.calls.find(c => c.m === "uncertainAccountAttempts")!.args).toEqual(["a1"]);
+    const denied = await client.callTool({ name: "resolve_uncertain_send", arguments: { sendLogId: "log", outcome: "notDelivered" } });
+    expect(denied.isError).toBe(true);
+    const resolved = await client.callTool({ name: "resolve_uncertain_send", arguments: { sendLogId: "log", outcome: "notDelivered", confirmed: true } });
+    expect(sc(resolved)).toEqual({ outcome: "notDelivered" });
   });
 
   it("send_email resolves a missing account to an error", async () => {

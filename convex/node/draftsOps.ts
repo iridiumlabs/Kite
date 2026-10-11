@@ -113,12 +113,17 @@ export const pushDraftUnderLease = internalAction({
       );
       const draftsPath = draftsState?.path ?? "Drafts";
       if (!draftsState) await port.createMailbox("Drafts");
-      const { uid } = await port.append(
+      const appended = await port.append(
         draftsPath,
         source,
         ["\\Draft", "\\Seen"],
         new Date(draft.updatedAt),
       );
+      // APPENDUID is optional. Resolve the newest copy before marking clean,
+      // and collect prior copies left by an interrupted/lost APPEND response.
+      const copies = await port.searchHeader(draftsPath, "X-Post-Draft-Id", draft.messageIdHeader);
+      const uid = appended.uid ?? (copies.length ? Math.max(...copies) : undefined);
+      if (uid === undefined) throw new Error("Draft APPEND could not be reconciled");
       const prevUid: number | undefined = draft.remoteUid;
       const folderId = await ctx.runMutation(internal.syncStore.upsertFolder, {
         accountId: draft.accountId,
@@ -134,12 +139,13 @@ export const pushDraftUnderLease = internalAction({
       });
       if (!recorded && uid !== undefined) {
         // The draft was sent or discarded while APPEND was in flight.
-        await port.expunge(draftsPath, [uid], true);
+        await port.expunge(draftsPath, [...new Set([...copies, uid])], true);
         return { uid: undefined };
       }
-      if (prevUid !== undefined && prevUid !== uid) {
+      const obsolete = [...new Set([...copies, ...(prevUid !== undefined ? [prevUid] : [])])].filter(old => old !== uid);
+      if (obsolete.length) {
         try {
-          await port.expunge(draftsPath, [prevUid], true);
+          await port.expunge(draftsPath, obsolete, true);
         } catch {
           // The old remote copy will be cleaned on the next sync.
         }

@@ -377,6 +377,41 @@ export const uncertainDraftAttempts = query({
   },
 });
 
+export const uncertainAccountAttempts = query({
+  args: { ...apiKeyArg, accountId: v.id("accounts") },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const account = await ctx.db.get(args.accountId);
+    if (!account || account.userId !== userId) throw new Error("Account not found");
+    const logs = await ctx.db.query("sendLog").withIndex("by_user_account_status", q => q.eq("userId", userId).eq("accountId", args.accountId).eq("status", "uncertain")).order("desc").take(100);
+    return logs.map(log => ({
+      sendLogId: log._id, draftId: log.draftId, messageIdHeader: log.messageIdHeader, createdAt: log.createdAt,
+      ...uncertainResolutionOptions(log, Date.now()),
+    }));
+  },
+});
+
+// Direct MCP sends have no draft. Resolution never initiates SMTP.
+export const resolveUncertainSend = mutation({
+  args: { ...apiKeyArg, sendLogId: v.id("sendLog"), outcome: v.union(v.literal("delivered"), v.literal("notDelivered")), confirmed: v.literal(true) },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const log = await ctx.db.get(args.sendLogId);
+    if (!log || log.userId !== userId) throw new Error("Send attempt not found");
+    if (log.draftId) throw new Error("Resolve this attempt through its draft");
+    if (log.status !== "uncertain") throw new Error("This delivery is no longer uncertain");
+    const options = uncertainResolutionOptions(log, Date.now());
+    if (!(args.outcome === "delivered" ? options.canConfirmDelivered : options.canConfirmNotDelivered)) throw new Error("This send is still active or has known delivery; wait for finalization");
+    const sent = args.outcome === "delivered" ? await ctx.db.query("messages").withIndex("by_account_msgid", q => q.eq("accountId", log.accountId).eq("messageIdHeader", log.messageIdHeader)).first() : null;
+    await ctx.db.patch(log._id, {
+      status: args.outcome === "delivered" ? "sent" : "failed", resolution: args.outcome, resolvedAt: Date.now(),
+      messageId: sent?.folderRole === "sent" ? sent._id : log.messageId,
+      error: args.outcome === "notDelivered" ? "User confirmed non-delivery. Use a new idempotency key to retry." : undefined,
+    });
+    return { outcome: args.outcome };
+  },
+});
+
 export const resolveUncertainDraft = mutation({
   args: { ...apiKeyArg, draftId: v.id("drafts"), sendLogId: v.id("sendLog"), outcome: v.union(v.literal("delivered"), v.literal("notDelivered")), confirmed: v.literal(true) },
   handler: async (ctx, args) => {
@@ -439,7 +474,7 @@ interface SendOutcome {
 }
 
 async function executeSend(
-  ctx: Pick<ActionCtx, "runQuery" | "runMutation" | "runAction">,
+  ctx: Pick<ActionCtx, "runQuery" | "runMutation" | "runAction" | "storage" | "scheduler">,
   args: {
     userId: string;
     accountId: Id<"accounts">;
@@ -551,6 +586,18 @@ async function executeSend(
   const sendLogId = begin.sendLogId;
 
   try {
+    // Keep bytes out of the Node action's 5 MiB argument budget. Delay cleanup
+    // so a lost action response cannot delete a still-running send's inputs.
+    const attachments: NonNullable<typeof args.performArgs.attachments> = [];
+    for (const att of args.performArgs.attachments ?? []) {
+      if ("contentBase64" in att) {
+        const decoded = atob(att.contentBase64);
+        const bytes = Uint8Array.from(decoded, c => c.charCodeAt(0));
+        const storageId = await ctx.storage.store(new Blob([bytes], { type: att.contentType }));
+        await ctx.scheduler.runAfter(24 * 60 * 60 * 1000, internal.send.deleteTemporaryAttachment, { storageId });
+        attachments.push({ storageId, filename: att.filename, contentType: att.contentType });
+      } else attachments.push(att);
+    }
     const res: {
       messageId: Id<"messages"> | undefined;
       deduped: boolean;
@@ -569,7 +616,7 @@ async function executeSend(
       inReplyTo: args.inReplyTo,
       references: args.references,
       messageIdHeader,
-      attachments: args.performArgs.attachments,
+      attachments,
     });
     return { sendLogId, messageId: res.messageId, deduped: res.deduped, ...(res.rejectedRecipients?.length ? { rejectedRecipients: res.rejectedRecipients } : {}) };
   } catch (err) {
@@ -582,6 +629,11 @@ async function executeSend(
     throw new Error(msg);
   }
 }
+
+export const deleteTemporaryAttachment = internalMutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => { await ctx.storage.delete(args.storageId); },
+});
 
 export const accountDomain = internalQuery({
   args: { accountId: v.id("accounts") },
@@ -891,7 +943,7 @@ export const failClaimedDraft = internalMutation({
 });
 
 async function runSendDraft(
-  ctx: Pick<ActionCtx, "runQuery" | "runMutation" | "runAction">,
+  ctx: Pick<ActionCtx, "runQuery" | "runMutation" | "runAction" | "storage" | "scheduler">,
   userId: string,
   draftId: Id<"drafts">,
   idempotencyKey?: string,
