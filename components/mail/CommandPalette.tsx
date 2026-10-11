@@ -1,7 +1,8 @@
 "use client";
 
 import { Command } from "cmdk";
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { Dialog } from "@base-ui/react/dialog";
 import { SearchIcon } from "@/components/icons";
 import type { ThreadItem } from "@/lib/ui/types";
 import { senderDisplay } from "@/lib/ui/avatars";
@@ -29,25 +30,16 @@ export interface CommandPaletteProps {
 export function CommandPalette(p: CommandPaletteProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (p.open) {
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
-  }, [p.open]);
-
-  if (!p.open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-70 flex items-start justify-center pt-[15vh] bg-black/20"
-      onClick={p.onClose}
-      role="presentation"
-    >
-      <div
-        className="dialog-popup w-[560px] max-w-[92vw] rounded-xl bg-menu-bg overflow-clip"
-        style={{ boxShadow: "var(--shadow-compose)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Dialog.Root open={p.open} onOpenChange={(open) => !open && p.onClose()}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-70 bg-black/20" />
+        <Dialog.Popup
+          initialFocus={inputRef}
+          className="command-popup fixed top-[15vh] left-1/2 -translate-x-1/2 z-[71] w-[560px] max-w-[92vw] rounded-xl bg-menu-bg overflow-clip"
+          style={{ boxShadow: "var(--shadow-compose)" }}
+        >
+          <Dialog.Title className="sr-only">Search mail</Dialog.Title>
         <Command label="Search mail" shouldFilter={false} loop>
           <div className="flex items-center h-12 px-4 gap-2.5 border-b border-divider">
             <SearchIcon className="text-tertiary shrink-0" />
@@ -137,7 +129,8 @@ export function CommandPalette(p: CommandPaletteProps) {
             )}
           </Command.List>
         </Command>
-      </div>
-    </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

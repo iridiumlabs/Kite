@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { Providers } from "@/components/providers";
 import { AppToaster } from "@/components/AppToaster";
+import { MotionPreferences } from "@/components/ui/MotionPreferences";
 import "./globals.css";
 
 const inter = Inter({
@@ -23,8 +24,10 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning className={inter.variable}>
       <body>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-          <Providers>{children}</Providers>
-          <AppToaster />
+          <MotionPreferences>
+            <Providers>{children}</Providers>
+            <AppToaster />
+          </MotionPreferences>
         </ThemeProvider>
       </body>
     </html>

@@ -9,7 +9,6 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AnimatePresence, motion } from "motion/react";
 import {
   ComposeWindow,
   QuotedPreview,
@@ -903,13 +902,12 @@ function ComposePane({
 
   if (win.minimized) {
     return (
-      <motion.div
-        layout
-        className="pressable flex items-center w-70 h-9 rounded-t-lg bg-menu ring-1 ring-menu-ring menu-shadow"
+      <div
+        className="flex items-center w-70 h-9 rounded-t-lg bg-menu ring-1 ring-menu-ring menu-shadow"
       >
         <button
           onClick={() => ui.restoreCompose(win.id)}
-          className="flex items-center grow h-full px-3 min-w-0 text-left"
+          className="pressable flex items-center grow h-full px-3 min-w-0 text-left"
         >
           <span className="grow font-semibold text-primary text-[13px]/4 truncate">
             {subject || "New message"}
@@ -925,7 +923,7 @@ function ComposePane({
         >
           ×
         </button>
-      </motion.div>
+      </div>
     );
   }
 
@@ -942,16 +940,15 @@ export function ComposeLayer({
   const settings = useQuery(api.settings.get, {});
   const undoSendSeconds = settings?.undoSendSeconds ?? 5;
   const isMobile = useMediaQuery("(max-width: 767px)");
-
   const visible = compose.filter((w) => !w.minimized);
   const minimized = compose.filter((w) => w.minimized);
+  // Draft lifetime belongs to the store, not an animation completion callback.
   if (compose.length === 0) return null;
-
   if (isMobile) {
     const w = visible[visible.length - 1] ?? minimized[minimized.length - 1];
     if (!w) return null;
     return (
-      <div className="fixed inset-0 z-40 bg-app">
+      <div key={w.id} className="compose-surface fixed inset-0 z-40 bg-app">
         <div className="h-full [&_div[role=dialog]]:w-full [&_div[role=dialog]]:h-full [&_div[role=dialog]]:rounded-none [&_div[role=dialog]]:shadow-none">
           <ComposePane
             win={w}
@@ -965,24 +962,15 @@ export function ComposeLayer({
 
   return (
     <div className="fixed bottom-6 right-6 z-40 flex items-end gap-3 pointer-events-none">
-      <AnimatePresence>
-        {compose.map((w) => (
-          <motion.div
-            key={w.id}
-            initial={{ opacity: 0, scale: 0.97, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.98, y: 8 }}
-            transition={{ duration: 0.15, ease: [0.23, 1, 0.32, 1] }}
-            style={{ pointerEvents: "auto", transformOrigin: "bottom right" }}
-          >
-            <ComposePane
-              win={w}
-              accounts={accounts}
-              undoSendSeconds={undoSendSeconds}
-            />
-          </motion.div>
-        ))}
-      </AnimatePresence>
+      {compose.map((w) => (
+        <div key={w.id} className="compose-surface pointer-events-auto">
+          <ComposePane
+            win={w}
+            accounts={accounts}
+            undoSendSeconds={undoSendSeconds}
+          />
+        </div>
+      ))}
     </div>
   );
 }

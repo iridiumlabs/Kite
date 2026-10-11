@@ -103,7 +103,7 @@ function SectionHeader({
           {title}
         </div>
         <span
-          className="inline-flex transition-transform duration-150 ease-out"
+          className="inline-flex disclosure-icon"
           style={{ transform: collapsed ? "rotate(-90deg)" : "none" }}
         >
           <ChevronDown className="text-quaternary" />

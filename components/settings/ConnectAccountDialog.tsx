@@ -107,11 +107,13 @@ export function ConnectAccountDialog({
             </div>
             <button
               onClick={() => setAdvanced((v) => !v)}
+              aria-expanded={advanced}
               className="flex items-center gap-1 text-tertiary text-xs/4 w-max"
             >
               <ChevronDown
                 size={12}
-                className={advanced ? "rotate-180 transition-transform" : "transition-transform"}
+                className="disclosure-icon"
+                style={{ transform: advanced ? "rotate(180deg)" : "none" }}
               />
               Advanced
             </button>

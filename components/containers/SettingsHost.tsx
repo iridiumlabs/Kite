@@ -73,9 +73,9 @@ function Toggle({
       checked={checked}
       aria-label={label}
       onCheckedChange={onChange}
-      className="inline-flex shrink-0 w-9 h-5.5 rounded-full bg-[#0000001F] dark:bg-[#FFFFFF29] data-[checked]:bg-accent transition-colors relative"
+      className="inline-flex shrink-0 w-9 h-5.5 rounded-full bg-[#0000001F] dark:bg-[#FFFFFF29] data-[checked]:bg-accent switch-track relative"
     >
-      <Switch.Thumb className="absolute top-0.5 left-0.5 size-4.5 rounded-full bg-white shadow transition-transform data-[checked]:translate-x-3.5" />
+      <Switch.Thumb className="absolute top-0.5 left-0.5 size-4.5 rounded-full bg-white shadow switch-thumb data-[checked]:translate-x-3.5" />
     </Switch.Root>
   );
 }

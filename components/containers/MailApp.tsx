@@ -928,7 +928,7 @@ export function MailApp() {
         <Dialog.Root open={ui.sidebarOpen} onOpenChange={ui.setSidebarOpen}>
           <Dialog.Portal>
             <Dialog.Backdrop className="fixed inset-0 z-45 bg-black/20 dialog-backdrop" />
-            <Dialog.Popup className="fixed inset-y-0 left-0 z-46 dialog-popup">
+            <Dialog.Popup className="fixed inset-y-0 left-0 z-46 sidebar-drawer">
               <Dialog.Title className="sr-only">Mailboxes</Dialog.Title>
               {sidebarEl}
             </Dialog.Popup>

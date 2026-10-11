@@ -59,7 +59,7 @@ let composeSeq = 0;
 
 export const useUI = create<UIState>((set, get) => ({
   paletteOpen: false,
-  setPaletteOpen: (v) => set({ paletteOpen: v }),
+  setPaletteOpen: (v) => set(v ? { paletteOpen: true, sidebarOpen: false } : { paletteOpen: false }),
   settingsOpen: false,
   settingsTab: "general",
   openSettings: (tab) =>
@@ -81,12 +81,16 @@ export const useUI = create<UIState>((set, get) => ({
       // Reuse the mounted editor and its unsaved content, restore it if needed,
       // and bring it to the rightmost/front position instead of stacking copies.
       set(s => ({
+        sidebarOpen: false,
+        paletteOpen: false,
         compose: [...s.compose.filter(w => w.id !== existing.id), { ...existing, minimized: false }],
       }));
       return existing.id;
     }
     const id = `compose-${++composeSeq}`;
     set((s) => ({
+      sidebarOpen: false,
+      paletteOpen: false,
       compose: [
         ...s.compose,
         {

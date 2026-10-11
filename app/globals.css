@@ -112,6 +112,11 @@
   --color-danger: var(--danger);
   --color-compose-header: var(--compose-header);
   --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
+  --motion-press: 160ms;
+  --motion-control: 150ms;
+  --motion-surface: 180ms;
+  --motion-exit: 120ms;
+  --motion-drawer: 240ms;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
@@ -145,93 +150,123 @@ body {
   box-shadow: var(--shadow-menu);
 }
 
-/* Press feedback: instant on pointer-down */
-.pressable {
-  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+/* Pointer feedback, with no movement for disabled or keyboard controls. */
+.pressable,
+.icon-btn {
+  transition: transform var(--motion-press) var(--ease-out);
 }
-.pressable:active {
+.pressable:active:where(:not(:disabled):not([aria-disabled="true"]):not([data-disabled])),
+.icon-btn:active:where(:not(:disabled):not([aria-disabled="true"]):not([data-disabled])) {
+  transform: scale(0.97);
+  transition-duration: 100ms;
+}
+
+/* Base UI keeps surfaces mounted through their ending-style transition.
+   Transitions can reverse from the currently displayed value without restarting. */
+.menu-popup,
+.popover-popup {
+  transform-origin: var(--transform-origin, top left);
+  transition:
+    opacity var(--motion-control) var(--ease-out),
+    transform var(--motion-control) var(--ease-out);
+}
+.menu-popup[data-starting-style],
+.menu-popup[data-ending-style],
+.popover-popup[data-starting-style],
+.popover-popup[data-ending-style] {
+  opacity: 0;
   transform: scale(0.97);
 }
-
-/* Base UI menu / popover animation: origin-aware scale + fade */
-@keyframes menu-in {
-  from {
-    opacity: 0;
-    transform: scale(0.97);
-  }
+.menu-popup[data-ending-style],
+.popover-popup[data-ending-style] {
+  transition-duration: var(--motion-exit);
+  pointer-events: none;
 }
-@keyframes menu-out {
-  to {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-}
-.menu-popup {
-  transform-origin: var(--transform-origin, top left);
-  animation: menu-in 150ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-.menu-popup[data-ending-style] {
-  animation: menu-out 100ms ease-in forwards;
-}
-.menu-popup[data-instant] {
-  animation-duration: 0ms;
+.menu-popup[data-instant],
+.popover-popup[data-instant] {
+  transition-duration: 0ms;
 }
 
-/* Base UI dialog animation */
-@keyframes dialog-in {
-  from {
-    opacity: 0;
-    transform: scale(0.98);
-  }
-}
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes fade-out {
-  to {
-    opacity: 0;
-  }
-}
 .dialog-backdrop {
-  animation: fade-in 150ms ease-out;
+  transition: opacity var(--motion-surface) var(--ease-out);
 }
+.dialog-backdrop[data-starting-style],
 .dialog-backdrop[data-ending-style] {
-  animation: fade-out 120ms ease-in forwards;
+  opacity: 0;
 }
 .dialog-popup {
   transform-origin: center;
-  animation: dialog-in 180ms cubic-bezier(0.23, 1, 0.32, 1);
+  transition:
+    opacity var(--motion-surface) var(--ease-out),
+    transform var(--motion-surface) var(--ease-out);
 }
+.dialog-popup[data-starting-style],
 .dialog-popup[data-ending-style] {
-  animation: fade-out 120ms ease-in forwards;
+  opacity: 0;
+  transform: scale(0.98);
+}
+.dialog-popup[data-ending-style],
+.dialog-backdrop[data-ending-style] {
+  transition-duration: var(--motion-exit);
+  pointer-events: none;
 }
 
-/* Skeleton shimmer */
-@keyframes shimmer {
-  from {
-    background-position: -200px 0;
-  }
-  to {
-    background-position: 200px 0;
+/* The mailbox drawer enters and returns along the same horizontal path. */
+.sidebar-drawer {
+  transition:
+    opacity var(--motion-drawer) var(--ease-out),
+    transform var(--motion-drawer) var(--ease-drawer);
+}
+.sidebar-drawer[data-starting-style],
+.sidebar-drawer[data-ending-style] {
+  opacity: 0;
+  transform: translateX(-100%);
+}
+.sidebar-drawer[data-ending-style] {
+  transition-duration: var(--motion-surface);
+  pointer-events: none;
+}
+
+/* Opening must remain usable without a JS animation driver. The normal
+   style is visible; browsers without starting-style simply show it instantly. */
+.compose-surface {
+  opacity: 1;
+  transition: opacity var(--motion-surface) var(--ease-out);
+}
+@starting-style {
+  .compose-surface {
+    opacity: 0;
   }
 }
+
+.disclosure-icon,
+.switch-thumb {
+  transition: transform var(--motion-control) var(--ease-out);
+}
+.switch-track {
+  transition: background-color var(--motion-control) ease;
+}
+
+/* Static placeholders avoid constant repainting across every loading row. */
 .skeleton {
   border-radius: 4px;
-  background: linear-gradient(
-    90deg,
-    var(--hover) 25%,
-    var(--hover-strong) 50%,
-    var(--hover) 75%
-  );
-  background-size: 400px 100%;
-  animation: shimmer 1.4s linear infinite;
+  background: var(--hover-strong);
 }
 
 /* Sidebar / list rows */
 .mail-row {
   transition: background-color 120ms ease;
+}
+.mail-row.pressable {
+  transition:
+    background-color 120ms ease,
+    transform var(--motion-press) var(--ease-out);
+}
+/* Selection and keyboard focus should never trail navigation. */
+.mail-row[aria-selected="true"],
+.mail-row[data-focused],
+.mail-row:focus-visible {
+  transition: none;
 }
 @media (hover: hover) and (pointer: fine) {
   .mail-row:hover {
@@ -283,10 +318,8 @@ body {
     background: var(--hover);
   }
 }
-.icon-btn:active {
-  transform: scale(0.97);
-}
-.icon-btn[data-disabled] {
+.icon-btn[data-disabled],
+.icon-btn:disabled {
   opacity: 0.35;
   pointer-events: none;
 }
@@ -400,6 +433,10 @@ body {
 [data-sonner-toast] {
   font-size: 13px;
 }
+/* Keep Sonner's stacking and swipe behavior, without tweening toast height. */
+[data-sonner-toaster] [data-sonner-toast]:not([data-swiping="true"]) {
+  transition-property: transform, opacity;
+}
 
 /* Keyboard focus belongs on controls, not around borderless editing surfaces.
    A blanket :focus-visible rule overrides the editor's outline-none because
@@ -421,21 +458,53 @@ body {
 .menu-popup:focus-visible,
 .popover-popup:focus-visible,
 .dialog-popup:focus-visible,
+.command-popup:focus-visible,
 [cmdk-input]:focus-visible,
 [cmdk-list]:focus-visible {
   outline: none;
 }
 
+/* Input modality applies to portals too. Shortcuts and keyboard activations
+   are instant; pointer interactions retain the subtle surface transitions. */
+:root[data-motion-input="keyboard"] :is(
+  .menu-popup, .popover-popup, .dialog-popup, .dialog-backdrop,
+  .sidebar-drawer, .compose-surface, .pressable, .icon-btn, .disclosure-icon,
+  .switch-track, .switch-thumb, .mail-row
+) {
+  transition: none;
+}
+:root[data-motion-input="keyboard"] :is(.pressable, .icon-btn):active {
+  transform: none;
+}
+:root[data-motion-input="keyboard"] [data-sonner-toaster] [data-sonner-toast] {
+  /* Sonner also declares durations on more specific removal-state selectors. */
+  transition-duration: 0ms !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .menu-popup,
+  .popover-popup,
   .dialog-popup,
-  .dialog-backdrop {
-    animation-duration: 80ms;
+  .dialog-backdrop,
+  .sidebar-drawer,
+  .compose-surface {
+    transition-property: opacity;
+    transition-duration: 80ms;
   }
-  .skeleton {
-    animation: none;
-  }
-  .pressable:active {
+  :is(.menu-popup, .popover-popup, .dialog-popup, .sidebar-drawer)[data-starting-style],
+  :is(.menu-popup, .popover-popup, .dialog-popup, .sidebar-drawer)[data-ending-style] {
     transform: none;
+  }
+  .pressable,
+  .icon-btn,
+  .disclosure-icon,
+  .switch-thumb {
+    transition: none;
+  }
+  :is(.pressable, .icon-btn):active {
+    transform: none;
+  }
+  .animate-spin {
+    animation: none;
   }
 }

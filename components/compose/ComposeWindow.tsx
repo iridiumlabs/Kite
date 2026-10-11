@@ -1,10 +1,11 @@
 "use client";
 
 import clsx from "clsx";
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   MinusIcon,
   ExpandIcon,
+  RestoreIcon,
   XIcon,
   Send,
   TypeIcon,
@@ -15,6 +16,8 @@ import {
 } from "@/components/icons";
 import { avatarColors, initials } from "@/lib/ui/avatars";
 import { formatBytes } from "@/lib/ui/dates";
+import { useMediaQuery } from "@/lib/ui/useMediaQuery";
+import { animateComposeResize } from "@/lib/ui/composeResize";
 
 export interface RecipientChip {
   email: string;
@@ -182,7 +185,7 @@ export function QuotedPreview({ text }: { text: string }) {
         <span className="tracking-[0.08em] text-tertiary text-xs/4">•••</span>
         <span className="grow text-tertiary text-xs/4">Quoted text</span>
         <span
-          className="inline-flex transition-transform duration-150 ease-out"
+          className="inline-flex disclosure-icon"
           style={{ transform: open ? "rotate(180deg)" : "none" }}
         >
           <ChevronDown className="text-quaternary" />
@@ -207,10 +210,35 @@ const STATUS_LABEL: Record<string, string | undefined> = {
 };
 
 export function ComposeWindow(p: ComposeWindowProps) {
+  const windowRef = useRef<HTMLDivElement>(null);
+  const resizeFrom = useRef<DOMRect | null>(null);
+  const resizeAnimation = useRef<Animation | null>(null);
+  const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
+
+  useLayoutEffect(() => {
+    const from = resizeFrom.current;
+    resizeFrom.current = null;
+    // Cancel after measuring the live rectangle, so a rapid reverse never jumps
+    // back to the previous target. This never controls mounting or visibility.
+    resizeAnimation.current?.cancel();
+    const node = windowRef.current;
+    if (node && from) {
+      const keyboard = document.documentElement.getAttribute("data-motion-input") === "keyboard";
+      resizeAnimation.current = animateComposeResize(node, from, reduced || !!p.mobile || keyboard);
+    }
+    return () => resizeAnimation.current?.cancel();
+  }, [p.expanded, p.mobile, reduced]);
+
+  const toggleExpanded = () => {
+    resizeFrom.current = windowRef.current?.getBoundingClientRect() ?? null;
+    p.onExpand();
+  };
+
   return (
     <div
+      ref={windowRef}
       className={clsx(
-        "flex flex-col overflow-clip bg-app",
+        "flex flex-col overflow-clip bg-app origin-bottom-right",
         p.mobile
           ? "w-full h-full rounded-none"
           : p.expanded
@@ -241,11 +269,13 @@ export function ComposeWindow(p: ComposeWindowProps) {
             <MinusIcon />
           </button>
           <button
-            aria-label="Expand"
-            onClick={p.onExpand}
+            aria-label={p.expanded ? "Restore size" : "Expand"}
+            title={p.expanded ? "Restore size" : "Expand"}
+            aria-pressed={!!p.expanded}
+            onClick={toggleExpanded}
             className="icon-btn size-7 text-secondary"
           >
-            <ExpandIcon />
+            {p.expanded ? <RestoreIcon /> : <ExpandIcon />}
           </button>
           <button
             aria-label="Close"

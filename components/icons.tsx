@@ -404,6 +404,17 @@ export function ExpandIcon(props: IconProps) {
   );
 }
 
+export function RestoreIcon(props: IconProps) {
+  return (
+    <svg {...base({ size: 14, ...props })}>
+      <polyline points="4 14 10 14 10 20" {...strokeProps(1.9)} />
+      <polyline points="20 10 14 10 14 4" {...strokeProps(1.9)} />
+      <path d="M14 10l7-7" {...strokeProps(1.9)} />
+      <path d="M3 21l7-7" {...strokeProps(1.9)} />
+    </svg>
+  );
+}
+
 export function XIcon(props: IconProps) {
   const { strokeWidth = 1.9, ...rest } = props as IconProps & {
     strokeWidth?: number;
