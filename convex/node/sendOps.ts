@@ -7,6 +7,7 @@ import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
 import MailComposer from "nodemailer/lib/mail-composer/index.js";
+import { MailParserPort } from "./mailParser";
 import { connectImap, FlowPort, accountToImapConfig } from "./imap";
 import { decryptCredentials } from "./crypto";
 import { smtpTransport } from "./accountsOps";
@@ -168,6 +169,10 @@ export const performSend = internalAction({
       );
     });
 
+    // Use the same MIME identifiers as attachment downloads and sync.
+    // Parse before SMTP so a parser failure is proven pre-delivery.
+    const parsed = await new MailParserPort().parse(source);
+
     const transport = smtpTransport({
       host: account.smtpHost,
       port: account.smtpPort,
@@ -175,7 +180,7 @@ export const performSend = internalAction({
       username,
       password,
     });
-    let delivery: ReturnType<typeof smtpDelivery>;
+    let delivery: ReturnType<typeof smtpDelivery> | undefined;
     try {
       await ctx.runMutation(internal.send.markSendUncertain, {
         sendLogId: args.sendLogId,
@@ -203,6 +208,11 @@ export const performSend = internalAction({
       throw error;
     } finally {
       transport.close();
+      await ctx.runMutation(internal.send.finishSmtpAttempt, {
+        sendLogId: args.sendLogId,
+        accepted: !!delivery,
+        rejectedRecipients: delivery?.rejected.map(a => a.email),
+      }).catch(() => {}); // Keep the original SMTP outcome and continue finalization.
     }
 
     // Give the server a moment to file the message, then check whether it
@@ -266,12 +276,9 @@ export const performSend = internalAction({
       bcc: bcc.filter(a => delivery.accepted.includes(a)),
       rejectedRecipients: delivery.rejected.map(a => a.email),
       text: args.text ?? "",
-      attachments: attachments.map((a, i) => ({
-        id: `a${i}`,
-        filename: a.filename,
-        contentType: a.contentType ?? "application/octet-stream",
-        size: a.content.length,
-        inline: false,
+      attachments: parsed.attachments.map(a => ({
+        id: a.id, filename: a.filename, contentType: a.contentType,
+        size: a.size, inline: a.inline, ...(a.cid ? { cid: a.cid } : {}),
       })),
     };
     try {

@@ -161,6 +161,38 @@ test("discard during a send's save cannot queue the discarded draft", async () =
   expect(h.mutations.get("drafts:discard")).toHaveBeenCalledWith({ draftId: "discarded-draft" });
 });
 
+test("confirming delivery closes the uncertain composer without a late autosave", async () => {
+  Object.assign(win, { mode: "draft", draftId: "draft" });
+  try {
+    h.draft = { _id: "draft", accountId: "account", mode: "new", status: "uncertain", to: [], cc: [], bcc: [], subject: "Ambiguous", text: "Body", html: "<p>Body</p>", attachments: [] };
+    h.states = []; h.refs = []; h.effects = []; render(); render();
+    expect(props().sendDisabled).toBe(true);
+    (props().subjectInput as ReactElement<{ onChange: (e: unknown) => void }>).props.onChange({ target: { value: "Do not resurrect" } });
+    const resolution = props().sendResolution as ReactElement<{ onResolved: (outcome: string) => void }>;
+    resolution.props.onResolved("delivered");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.close).toHaveBeenCalledWith("window");
+    expect(h.mutations.get("drafts:update")).not.toHaveBeenCalled();
+    expect(h.mutations.get("drafts:create")).not.toHaveBeenCalled();
+  } finally { win.mode = "forward"; delete (win as { draftId?: string }).draftId; }
+});
+
+test("a live partial-delivery settlement refreshes recipients before save and retry", async () => {
+  Object.assign(win, { mode: "draft", draftId: "draft" });
+  try {
+    const original = { _id: "draft", accountId: "account", mode: "new", status: "uncertain", to: [{ email: "accepted@x.com" }], cc: [], bcc: [{ email: "rejected@x.com" }], subject: "Partial", text: "Body", html: "<p>Body</p>", attachments: [], deliveryVersion: 0 };
+    h.draft = original;
+    h.states = []; h.refs = []; h.effects = []; render(); render();
+    h.draft = { ...original, status: "failed", to: [], deliveryVersion: 1 };
+    render(); render();
+    expect(props().to).toEqual([]);
+    expect(props().bcc).toMatchObject([{ email: "rejected@x.com" }]);
+    props().onSend(); await settle();
+    expect(h.mutations.get("drafts:update")).toHaveBeenCalledWith(expect.objectContaining({ draftId: "draft", expectedDeliveryVersion: 1, to: [], cc: [], bcc: [{ email: "rejected@x.com" }] }));
+    expect(h.mutations.get("drafts:scheduleSend")).toHaveBeenCalledOnce();
+  } finally { win.mode = "forward"; delete (win as { draftId?: string }).draftId; }
+});
+
 function senderItems(node: unknown): ReactElement<{ onClick: () => void }>[] {
   if (Array.isArray(node)) return node.flatMap(senderItems);
   if (!isValidElement(node)) return [];

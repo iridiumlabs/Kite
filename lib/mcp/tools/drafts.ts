@@ -50,6 +50,20 @@ const zDraftFields = {
 };
 
 export function registerDraftTools(server: McpServer, getBackend: BackendFor) {
+  addTool(server, getBackend, "list_uncertain_send_attempts", {
+    title: "List uncertain draft send attempts",
+    description: "Lists owner-scoped send reservations for an uncertain draft, including Message-ID and resolution eligibility. Select the attempt whose delivery evidence you checked.",
+    inputSchema: z.object({ draftId: z.string() }),
+    outputSchema: z.object({ attempts: z.array(z.object({ sendLogId: z.string(), messageIdHeader: z.string(), createdAt: z.number(), canConfirmDelivered: z.boolean(), canConfirmNotDelivered: z.boolean() })) }),
+    annotations: { readOnlyHint: true },
+  }, async (args, backend) => ({ attempts: await backend.uncertainDraftAttempts(args.draftId) }));
+  addTool(server, getBackend, "resolve_uncertain_draft", {
+    title: "Resolve uncertain draft delivery",
+    description: "Requires explicit user confirmation after checking delivery evidence. Delivered removes the stale draft and settles the reservation; notDelivered unlocks it for a NEW send attempt without sending automatically. An empty Sent folder does NOT prove non-delivery; retrying can create duplicates. Never infer user confirmation or resolve an active attempt.",
+    inputSchema: z.object({ draftId: z.string(), sendLogId: z.string(), outcome: z.enum(["delivered", "notDelivered"]), confirmed: z.literal(true) }),
+    outputSchema: z.object({ outcome: z.enum(["delivered", "notDelivered"]) }),
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async (args, backend) => backend.resolveUncertainDraft(args));
   addTool(
     server,
     getBackend,

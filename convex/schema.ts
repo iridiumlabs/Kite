@@ -290,6 +290,9 @@ export default defineSchema({
     ),
     sendError: v.optional(v.string()),
     sendErrorAt: v.optional(v.number()),
+    sendLogId: v.optional(v.id("sendLog")),
+    sendClaimId: v.optional(v.string()),
+    deliveryVersion: v.optional(v.number()),
     remoteFolderId: v.optional(v.id("folders")),
     remoteUid: v.optional(v.number()),
     remoteDirty: v.boolean(),
@@ -326,6 +329,12 @@ export default defineSchema({
     accountId: v.id("accounts"),
     idempotencyKey: v.optional(v.string()),
     contentHash: v.string(),
+    draftId: v.optional(v.id("drafts")),
+    uncertainSince: v.optional(v.number()),
+    attemptFinishedAt: v.optional(v.number()),
+    smtpAcceptedAt: v.optional(v.number()),
+    resolution: v.optional(v.union(v.literal("delivered"), v.literal("notDelivered"))),
+    resolvedAt: v.optional(v.number()),
     status: v.union(
       v.literal("sending"),
       v.literal("uncertain"),
@@ -340,6 +349,7 @@ export default defineSchema({
   })
     .index("by_user_key", ["userId", "idempotencyKey"])
     .index("by_user_hash", ["userId", "contentHash", "createdAt"])
+    .index("by_user_account_status", ["userId", "accountId", "status", "createdAt"])
     .index("by_account", ["accountId"]),
 
   apiKeys: defineTable({

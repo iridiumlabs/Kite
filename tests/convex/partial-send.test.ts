@@ -28,6 +28,8 @@ test("partial completion retains only rejected recipients, preserves files, and 
   expect(retained).toMatchObject({ status: "failed", to: [], cc: [], bcc: [{ email: "rejected@x.com" }], text: "Body", attachments: draft!.attachments });
   expect(retained!.messageIdHeader).not.toBe(draft!.messageIdHeader);
   expect(retained!.sendError).toContain("Partially delivered");
+  await expect(user.mutation(api.drafts.update, { draftId, expectedDeliveryVersion: 0, to: draft!.to, cc: draft!.cc, bcc: draft!.bcc })).rejects.toThrow("Draft delivery changed");
+  expect((await user.query(api.drafts.get, { draftId }))!.to).toEqual([]);
   expect(await t.run(async ctx => (await ctx.storage.get(storageId))?.text())).toBe("attachment");
   const sent = await user.query(api.mail.getMessage, { messageId: result.messageId! });
   expect(sent).toMatchObject({ to: completion.to, cc: completion.cc, bcc: [] });

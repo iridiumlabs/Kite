@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { composeAccount } from "@/lib/ui/composeAccount";
 import { initialComposeBody, replacementComposeSignature } from "@/lib/ui/composeBody";
 import { draftSendProblem } from "@/lib/ui/draftSendProblem";
+import { UncertainSendResolution } from "@/components/compose/UncertainSendResolution";
 import {
   ComposeWindow,
   QuotedPreview,
@@ -299,7 +300,7 @@ function ComposePane({
   const isMobile = useMediaQuery("(max-width: 767px)");
   const existingDraft = useQuery(
     api.drafts.get,
-    win.mode === "draft" && win.draftId
+    win.draftId
       ? { draftId: win.draftId as Id<"drafts"> }
       : "skip",
   );
@@ -337,6 +338,7 @@ function ComposePane({
   const [formatOpen, setFormatOpen] = useState(false);
   const [suggestQuery, setSuggestQuery] = useState("");
   const [initialized, setInitialized] = useState(false);
+  const [deliveryVersion, setDeliveryVersion] = useState(0);
   const draftIdRef = useRef<Id<"drafts"> | undefined>(
     win.mode === "draft" ? (win.draftId as Id<"drafts">) : undefined,
   );
@@ -368,6 +370,7 @@ function ComposePane({
   if (!initialized && ready) {
     setInitialized(true);
     if (win.mode === "draft" && existingDraft) {
+      setDeliveryVersion(existingDraft.deliveryVersion ?? 0);
       setTo(existingDraft.to.map(toChip));
       setCc(existingDraft.cc.map(toChip));
       setBcc(existingDraft.bcc.map(toChip));
@@ -401,6 +404,17 @@ function ComposePane({
         setSubject(replySubjectFor(orig));
       }
     }
+  }
+
+  // A partial send or explicit resolution changes the authoritative recipient
+  // snapshot. Refresh it synchronously; never autosave accepted recipients back.
+  if (initialized && existingDraft && deliveryVersion !== (existingDraft.deliveryVersion ?? 0)) {
+    setDeliveryVersion(existingDraft.deliveryVersion ?? 0);
+    setTo(existingDraft.to.map(toChip));
+    setCc(existingDraft.cc.map(toChip));
+    setBcc(existingDraft.bcc.map(toChip));
+    setShowCc(existingDraft.cc.length > 0);
+    setShowBcc(existingDraft.bcc.length > 0);
   }
 
   // quoted-text preview for replies/forwards: the send action appends the
@@ -520,6 +534,7 @@ function ComposePane({
       } else {
         await updateDraft({
           draftId: draftIdRef.current,
+          expectedDeliveryVersion: deliveryVersion,
           accountId: acct,
           to: to.map(({ email, name }) => ({ email, name })),
           cc: cc.map(({ email, name }) => ({ email, name })),
@@ -532,7 +547,8 @@ function ComposePane({
       setStatus((s) => (s === "scheduled" ? s : "saved"));
       dirtyRef.current = false;
       return draftIdRef.current;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Draft delivery changed")) toast.error("Delivery changed. Review the updated recipients or reopen this draft.");
       setStatus("error");
       return undefined;
     }
@@ -541,7 +557,7 @@ function ComposePane({
     savingRef.current = promise;
     try { return await promise; }
     finally { savingRef.current = null; }
-  }, [accountId, accounts, defaultAccountId, createDraft, updateDraft, to, cc, bcc, subject, win, ui]);
+  }, [accountId, accounts, defaultAccountId, createDraft, updateDraft, to, cc, bcc, subject, win, ui, deliveryVersion]);
 
   useEffect(() => { saveLatestRef.current = save; }, [save]);
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
@@ -760,6 +776,14 @@ function ComposePane({
         status={status}
         scheduledLabel={scheduledLabel}
         sendError={draftSendProblem(existingDraft)}
+        sendResolution={existingDraft?.status === "uncertain" ? <UncertainSendResolution draftId={existingDraft._id} onResolved={outcome => {
+          if (outcome === "delivered") {
+            discardedRef.current = true;
+            if (saveTimer.current) clearTimeout(saveTimer.current);
+            ui.closeCompose(win.id);
+            toast("Delivery confirmed");
+          } else toast("Draft unlocked. Use a new send attempt to retry.");
+        }} /> : undefined}
         fromLabel={
           <Menu.Root>
             <Menu.Trigger className="flex items-center gap-1.5 min-w-0">

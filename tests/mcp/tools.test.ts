@@ -34,6 +34,8 @@ const EXPECTED_TOOLS = [
   "delete_draft",
   "send_draft",
   "cancel_scheduled_send",
+  "list_uncertain_send_attempts",
+  "resolve_uncertain_draft",
   "mark_read",
   "mark_unread",
   "star",
@@ -223,6 +225,8 @@ function makeBackend(): PostBackend & {
     discardDraft: rec("discardDraft", async () => {}),
     scheduleDraft: rec("scheduleDraft", async () => {}),
     cancelScheduledDraft: rec("cancelScheduledDraft", async () => {}),
+    uncertainDraftAttempts: rec("uncertainDraftAttempts", async () => []),
+    resolveUncertainDraft: rec("resolveUncertainDraft", async (args: { outcome: "delivered" | "notDelivered" }) => ({ outcome: args.outcome })),
     setRead: rec("setRead", async () => {}),
     setStarred: rec("setStarred", async () => {}),
     archive: rec("archive", async () => {}),
@@ -453,6 +457,17 @@ describe("write tools", () => {
       expect(retried.rejectedRecipients).toEqual(["rejected@example.com"]);
       expect(retried.deduplicated).toBe(true);
     } finally { backend.sendMessage = send; backend.sendDraft = draft; }
+  });
+
+  it("uncertain-draft resolution requires explicit confirmation and forwards the selected attempt", async () => {
+    backend.uncertainDraftAttempts = async () => [{ sendLogId: "log", messageIdHeader: "m@x", createdAt: 1, canConfirmDelivered: true, canConfirmNotDelivered: true }];
+    backend.resolveUncertainDraft = async args => { backend.calls.push({ m: "resolveUncertainDraft", args: [args] }); return { outcome: args.outcome }; };
+    expect(sc(await client.callTool({ name: "list_uncertain_send_attempts", arguments: { draftId: "d1" } })).attempts).toMatchObject([{ sendLogId: "log" }]);
+    const denied = await client.callTool({ name: "resolve_uncertain_draft", arguments: { draftId: "d1", sendLogId: "log", outcome: "notDelivered" } });
+    expect(denied.isError).toBe(true);
+    const resolved = await client.callTool({ name: "resolve_uncertain_draft", arguments: { draftId: "d1", sendLogId: "log", outcome: "notDelivered", confirmed: true } });
+    expect(sc(resolved)).toEqual({ outcome: "notDelivered" });
+    expect(backend.calls.find(c => c.m === "resolveUncertainDraft")!.args[0]).toEqual({ draftId: "d1", sendLogId: "log", outcome: "notDelivered", confirmed: true });
   });
 
   it("send_email resolves a missing account to an error", async () => {

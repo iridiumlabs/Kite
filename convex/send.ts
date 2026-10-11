@@ -1,6 +1,8 @@
 import { v } from "convex/values";
 import {
   action,
+  mutation,
+  query,
   internalAction,
   internalMutation,
   internalQuery,
@@ -24,6 +26,8 @@ import {
 } from "./lib/compose";
 import { sendContentHash } from "./lib/idempotency";
 import type { Address } from "./lib/types";
+import { removeDraft } from "./model/draftCleanup";
+import { uncertainResolutionOptions } from "./lib/uncertainSend";
 
 const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 const ATTACHMENT_TOTAL_MAX = 25 * 1024 * 1024;
@@ -52,6 +56,8 @@ export const beginSend = internalMutation({
     contentHash: v.string(),
     messageIdHeader: v.string(),
     allowDuplicate: v.optional(v.boolean()),
+    draftId: v.optional(v.id("drafts")),
+    draftClaimId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     if (args.idempotencyKey) {
@@ -82,15 +88,21 @@ export const beginSend = internalMutation({
     if (dup && !args.allowDuplicate) {
       throw new Error("Possible duplicate send");
     }
+    const draft = args.draftId ? await ctx.db.get(args.draftId) : null;
+    if (args.draftId && (!draft || draft.userId !== args.userId || draft.accountId !== args.accountId)) throw new Error("Draft not found");
+    if (draft?.status === "uncertain") throw new Error("Resolve the uncertain delivery before sending again");
+    if (draft?.status === "sending" && (draft.sendLogId || draft.sendClaimId !== args.draftClaimId)) throw new Error("Draft is already sending");
     const sendLogId = await ctx.db.insert("sendLog", {
       userId: args.userId,
       accountId: args.accountId,
       idempotencyKey: args.idempotencyKey,
       contentHash: args.contentHash,
+      draftId: args.draftId,
       status: "sending",
       messageIdHeader: args.messageIdHeader,
       createdAt: Date.now(),
     });
+    if (draft) await ctx.db.patch(draft._id, { sendLogId, sendClaimId: args.draftClaimId, status: "sending" });
     return { sendLogId } as const;
   },
 });
@@ -119,6 +131,7 @@ export const completeSend = internalMutation({
         filename: v.string(),
         contentType: v.string(),
         size: v.number(),
+        cid: v.optional(v.string()),
         inline: v.boolean(),
       }),
     ),
@@ -126,7 +139,8 @@ export const completeSend = internalMutation({
   handler: async (ctx, args) => {
     const log = await ctx.db.get(args.sendLogId);
     if (!log) throw new Error("Send log not found");
-    if (log.status === "sent" && log.messageId) {
+    if (log.resolution === "notDelivered") throw new Error("This send was resolved as not delivered");
+    if (log.resolution === "delivered" || (log.status === "sent" && log.messageId)) {
       return { messageId: log.messageId, deduped: true, ...(log.rejectedRecipients?.length ? { rejectedRecipients: log.rejectedRecipients } : {}) };
     }
 
@@ -194,7 +208,7 @@ export const completeSend = internalMutation({
 
     if (args.draftId) {
       const draft = await ctx.db.get(args.draftId);
-      if (draft) {
+      if (draft && (!draft.sendLogId || draft.sendLogId === args.sendLogId)) {
         for (const att of draft.attachments) {
           if (!args.rejectedRecipients?.length && att.kind === "upload") {
             await ctx.storage.delete(att.storageId).catch(() => {});
@@ -220,6 +234,7 @@ export const completeSend = internalMutation({
             cc: draft.cc.filter(a => rejected.has(a.email.toLowerCase())),
             bcc: draft.bcc.filter(a => rejected.has(a.email.toLowerCase())),
             status: "failed",
+            deliveryVersion: (draft.deliveryVersion ?? 0) + 1,
             sendError: `Partially delivered. Not accepted: ${args.rejectedRecipients.join(", ")}. This draft contains only undelivered recipients.`.slice(0, 500),
             sendErrorAt: Date.now(), updatedAt: Date.now(),
             messageIdHeader: newMessageId(account?.email ?? args.from.email),
@@ -252,16 +267,19 @@ export const completeSend = internalMutation({
 });
 
 // Persist before touching SMTP: a transport/action failure can hide acceptance.
-// Only definite rejections may release this reservation for a normal retry.
+// Only definite rejections or explicit user-confirmed resolution can release it.
 export const markSendUncertain = internalMutation({
   args: { sendLogId: v.id("sendLog"), draftId: v.optional(v.id("drafts")) },
   handler: async (ctx, args) => {
     const log = await ctx.db.get(args.sendLogId);
     if (!log || log.status !== "sending") throw new Error("Send is not reserved");
-    await ctx.db.patch(log._id, { status: "uncertain" });
+    await ctx.db.patch(log._id, { status: "uncertain", uncertainSince: Date.now() });
     if (args.draftId) {
       const draft = await ctx.db.get(args.draftId);
-      if (draft) await ctx.db.patch(draft._id, { status: "uncertain" });
+      if (draft && (!draft.sendLogId || draft.sendLogId === args.sendLogId)) {
+        await ctx.db.patch(draft._id, { status: "uncertain", sendLogId: args.sendLogId });
+        await ctx.db.patch(log._id, { draftId: draft._id });
+      }
     }
   },
 });
@@ -275,7 +293,8 @@ export const failSend = internalMutation({
   },
   handler: async (ctx, args) => {
     const log = await ctx.db.get(args.sendLogId);
-    if (log && (log.status === "sending" || log.status === "uncertain")) {
+    const active = log && !log.resolution && (log.status === "sending" || log.status === "uncertain");
+    if (active) {
       await ctx.db.patch(args.sendLogId, {
         status: log.status === "uncertain" && !args.definiteRejection ? "uncertain" : "failed",
         error: args.error.slice(0, 500),
@@ -283,7 +302,7 @@ export const failSend = internalMutation({
     }
     if (args.draftId) {
       const draft = await ctx.db.get(args.draftId);
-      if (draft && (draft.status === "sending" || draft.status === "uncertain")) {
+      if (active && draft && (!draft.sendLogId || draft.sendLogId === args.sendLogId) && (draft.status === "sending" || draft.status === "uncertain")) {
         await ctx.db.patch(args.draftId, {
           status: draft.status === "uncertain" && !args.definiteRejection ? "uncertain" : "failed",
           updatedAt: Date.now(),
@@ -292,6 +311,68 @@ export const failSend = internalMutation({
         });
       }
     }
+  },
+});
+
+export const finishSmtpAttempt = internalMutation({
+  args: { sendLogId: v.id("sendLog"), accepted: v.boolean(), rejectedRecipients: v.optional(v.array(v.string())) },
+  handler: async (ctx, args) => {
+    const log = await ctx.db.get(args.sendLogId);
+    if (log?.status === "uncertain" && !log.resolution) await ctx.db.patch(log._id, {
+      attemptFinishedAt: Date.now(), smtpAcceptedAt: args.accepted ? (log.smtpAcceptedAt ?? Date.now()) : log.smtpAcceptedAt,
+      rejectedRecipients: args.accepted ? args.rejectedRecipients : log.rejectedRecipients,
+    });
+  },
+});
+
+export const uncertainDraftAttempts = query({
+  // Refresh token only; eligibility always uses the server clock.
+  args: { ...apiKeyArg, draftId: v.id("drafts"), refreshAt: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const draft = await ctx.db.get(args.draftId);
+    if (!draft || draft.userId !== userId) throw new Error("Draft not found");
+    if (draft.status !== "uncertain") return [];
+    const linked = draft.sendLogId ? await ctx.db.get(draft.sendLogId) : null;
+    const logs = linked ? [linked] : await ctx.db.query("sendLog").withIndex("by_user_account_status", q => q.eq("userId", userId).eq("accountId", draft.accountId).eq("status", "uncertain")).order("desc").take(20);
+    return logs.filter(log => log.userId === userId && log.accountId === draft.accountId && log.status === "uncertain" && (!log.draftId || log.draftId === draft._id)).map(log => ({
+      sendLogId: log._id, messageIdHeader: log.messageIdHeader, createdAt: log.createdAt,
+      ...uncertainResolutionOptions(log, Date.now()),
+    }));
+  },
+});
+
+export const resolveUncertainDraft = mutation({
+  args: { ...apiKeyArg, draftId: v.id("drafts"), sendLogId: v.id("sendLog"), outcome: v.union(v.literal("delivered"), v.literal("notDelivered")), confirmed: v.literal(true) },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const draft = await ctx.db.get(args.draftId);
+    const log = await ctx.db.get(args.sendLogId);
+    if (!draft || draft.userId !== userId) throw new Error("Draft not found");
+    if (!log || log.userId !== userId || log.accountId !== draft.accountId || (log.draftId && log.draftId !== draft._id) || (draft.sendLogId && draft.sendLogId !== log._id)) throw new Error("Send attempt not found");
+    if (draft.status !== "uncertain" || log.status !== "uncertain") throw new Error("This delivery is no longer uncertain");
+    const options = uncertainResolutionOptions(log, Date.now());
+    if (!(args.outcome === "delivered" ? options.canConfirmDelivered : options.canConfirmNotDelivered)) throw new Error("This send is still active or has known delivery; wait for finalization");
+    await ctx.db.patch(log._id, {
+      status: args.outcome === "delivered" ? "sent" : "failed", resolution: args.outcome, resolvedAt: Date.now(), draftId: draft._id,
+      error: args.outcome === "notDelivered" ? "User confirmed non-delivery. Use a new idempotency key to retry." : undefined,
+    });
+    if (args.outcome === "delivered") {
+      const sent = await ctx.db.query("messages").withIndex("by_account_msgid", q => q.eq("accountId", draft.accountId).eq("messageIdHeader", log.messageIdHeader)).first();
+      if (sent?.folderRole === "sent") await ctx.db.patch(log._id, { messageId: sent._id });
+      await removeDraft(ctx, draft);
+    } else {
+      const account = await ctx.db.get(draft.accountId);
+      const jobAt = Date.now() + 30_000;
+      await ctx.db.patch(draft._id, {
+        status: "editing", sendLogId: undefined, sendClaimId: undefined, sendError: undefined, sendErrorAt: undefined,
+        deliveryVersion: (draft.deliveryVersion ?? 0) + 1,
+        messageIdHeader: newMessageId(account?.email ?? "localhost"), updatedAt: Date.now(),
+        remoteDirty: true, pushScheduledAt: jobAt,
+      });
+      await ctx.scheduler.runAt(jobAt, internal.node.draftsOps.pushDraftNow, { draftId: draft._id });
+    }
+    return { outcome: args.outcome };
   },
 });
 
@@ -345,6 +426,7 @@ async function executeSend(
     idempotencyKey?: string;
     allowDuplicate?: boolean;
     draftId?: Id<"drafts">;
+    draftClaimId?: string;
     performArgs: {
       attachments?: (
         | { storageId: Id<"_storage">; filename?: string; contentType?: string }
@@ -403,6 +485,8 @@ async function executeSend(
       contentHash,
       messageIdHeader,
       allowDuplicate: args.allowDuplicate,
+      draftId: args.draftId,
+      draftClaimId: args.draftClaimId,
     },
   );
   if ("existing" in begin) {
@@ -413,11 +497,12 @@ async function executeSend(
     if (existing.status === "uncertain") {
       throw new Error("Delivery is uncertain. Check Sent before sending again.");
     }
-    if (args.draftId) {
+    if (args.draftId && args.draftClaimId) {
       // No SMTP attempt will complete this claim. Keep a different draft
       // editable when its caller reuses an existing idempotency key.
       await ctx.runMutation(internal.send.failClaimedDraft, {
         draftId: args.draftId,
+        claimId: args.draftClaimId,
         error: "This idempotency key is already in use. Use a new key to send this draft.",
       });
     }
@@ -756,16 +841,17 @@ export const claimDraftForSend = internalMutation({
     if (draft.status === "uncertain") throw new Error("Delivery is uncertain. Check Sent before sending again.");
     if (draft.to.length + draft.cc.length + draft.bcc.length === 0) throw new Error("Add at least one recipient before sending");
     if (!args.scheduledOnly && draft.scheduledJobId) await ctx.scheduler.cancel(draft.scheduledJobId).catch(() => {});
-    await ctx.db.patch(draft._id, { status: "sending", sendError: undefined, sendErrorAt: undefined, scheduledAt: undefined, scheduledJobId: undefined });
-    return draft;
+    const sendClaimId = newMessageId("claim");
+    await ctx.db.patch(draft._id, { status: "sending", sendLogId: undefined, sendClaimId, sendError: undefined, sendErrorAt: undefined, scheduledAt: undefined, scheduledJobId: undefined });
+    return { ...draft, sendClaimId };
   },
 });
 
 export const failClaimedDraft = internalMutation({
-  args: { draftId: v.id("drafts"), error: v.string() },
+  args: { draftId: v.id("drafts"), claimId: v.string(), error: v.string() },
   handler: async (ctx, args) => {
     const draft = await ctx.db.get(args.draftId);
-    if (draft?.status === "sending") await ctx.db.patch(draft._id, { status: "failed", sendError: args.error.slice(0, 500), sendErrorAt: Date.now(), updatedAt: Date.now() });
+    if (draft?.status === "sending" && !draft.sendLogId && draft.sendClaimId === args.claimId) await ctx.db.patch(draft._id, { status: "failed", sendError: args.error.slice(0, 500), sendErrorAt: Date.now(), updatedAt: Date.now() });
   },
 });
 
@@ -845,10 +931,11 @@ async function runSendDraft(
     idempotencyKey,
     allowDuplicate,
     draftId,
+    draftClaimId: draft.sendClaimId,
     performArgs: { attachments: performAttachments },
   });
   } catch (error) {
-    await ctx.runMutation(internal.send.failClaimedDraft, { draftId, error: error instanceof Error ? error.message : "Send failed" });
+    await ctx.runMutation(internal.send.failClaimedDraft, { draftId, claimId: draft.sendClaimId!, error: error instanceof Error ? error.message : "Send failed" });
     throw error;
   }
 }

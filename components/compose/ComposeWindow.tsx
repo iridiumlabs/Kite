@@ -55,6 +55,7 @@ export interface ComposeWindowProps {
   editor: ReactNode;
   quoted?: ReactNode;
   sendError?: string;
+  sendResolution?: ReactNode;
   attachments: ComposeAttachment[];
   onRemoveAttachment?: (i: number) => void;
   formatBar?: ReactNode;
@@ -348,6 +349,7 @@ export function ComposeWindow(p: ComposeWindowProps) {
       {p.sendError && (
         <div role="alert" className="shrink-0 border-b border-divider px-4 py-3 text-red-500 text-[13px]/5">
           {p.sendError}
+          {p.sendResolution}
         </div>
       )}
       {p.formatBar}

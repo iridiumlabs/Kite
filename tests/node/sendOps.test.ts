@@ -5,6 +5,7 @@ import type { ActionCtx } from "../../convex/_generated/server";
 import { internal } from "../../convex/_generated/api";
 import { performSend } from "../../convex/node/sendOps";
 import type { Id } from "../../convex/_generated/dataModel";
+import { MailParserPort } from "../../convex/node/mailParser";
 
 const h = vi.hoisted(() => ({ sendMail: vi.fn(), close: vi.fn(), mutation: vi.fn() }));
 vi.mock("../../convex/_generated/server", () => ({ internalAction: (definition: unknown) => definition }));
@@ -39,10 +40,13 @@ test.each([
   expect(h.close).toHaveBeenCalledOnce();
 });
 
-test("performSend finalizes partial acceptance with only accepted Sent recipients", async () => {
+test.each([false, true])("performSend finalizes partial acceptance with only accepted Sent recipients (tracking failure=%s)", async trackingFailure => {
   vi.useFakeTimers();
   h.sendMail.mockResolvedValue({ accepted: ["to@x.com", "cc@x.com"], rejected: ["bcc@x.com"] });
-  h.mutation.mockImplementation(async (ref, args) => getFunctionName(ref) === "send:completeSend" ? { messageId: "sent", deduped: false, rejectedRecipients: args.rejectedRecipients } : undefined);
+  h.mutation.mockImplementation(async (ref, args) => {
+    if (trackingFailure && getFunctionName(ref) === "send:finishSmtpAttempt") throw new Error("Tracking unavailable");
+    if (getFunctionName(ref) === "send:completeSend") return { messageId: "sent", deduped: false, rejectedRecipients: args.rejectedRecipients };
+  });
   const ctx = {
     runQuery: vi.fn(async ref => getFunctionName(ref) === "syncStore:getAccountDoc" ? { email: "me@x.com", displayName: "Me" } : {}),
     runMutation: h.mutation,
@@ -89,7 +93,17 @@ test("draft sends own forwarded bytes before SMTP so partial retries survive rem
   const pending = handler(ctx, args);
   await vi.waitFor(() => expect(h.sendMail).toHaveBeenCalledOnce());
   await vi.advanceTimersByTimeAsync(2000); await pending;
+  vi.useRealTimers();
   const preserved = h.mutation.mock.calls.find(([ref]) => getFunctionName(ref) === "syncStore:materializeDraftAttachments")![1];
   expect(preserved).toMatchObject({ draftId: "draft", allowSending: true, uploads: [{ messageId: "remote", attachmentId: "a0", storageId: "stored", size: 10 }] });
   expect(store.mock.invocationCallOrder[0]).toBeLessThan(h.sendMail.mock.invocationCallOrder[0]);
+  const raw = h.sendMail.mock.calls[0][0].raw as Buffer;
+  expect(raw.toString()).not.toMatch(/^Bcc:/m); // Keep blind recipients out of SMTP headers.
+  const reparsed = await new MailParserPort().parse(raw);
+  const complete = h.mutation.mock.calls.find(([ref]) => getFunctionName(ref) === "send:completeSend")![1];
+  expect(complete.attachments[0].id).toBe(reparsed.attachments[0].id);
+  expect(complete.attachments[0].id).not.toBe("a0");
+  const download = reparsed.attachments.find(a => a.id === complete.attachments[0].id);
+  expect(Buffer.from(download!.content!).toString()).toBe("attachment");
+  expect(complete.attachments[0]).toMatchObject({ filename: "a.txt", size: 10, inline: false });
 });

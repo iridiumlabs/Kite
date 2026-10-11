@@ -9,7 +9,7 @@ import { decryptCredentials } from "./crypto";
 import type { Doc } from "../_generated/dataModel";
 import { materializeDraftAttachments } from "./draftAttachments";
 
-async function buildDraftSource(
+export async function buildDraftSource(
   ctx: Pick<ActionCtx, "runQuery" | "runAction" | "storage">,
   draft: Doc<"drafts">,
   account: Doc<"accounts">,
@@ -52,8 +52,11 @@ async function buildDraftSource(
     headers: { "X-Post-Draft-Id": draft.messageIdHeader },
     attachments,
   });
+  const compiled = mail.compile();
+  // Drafts are private mailbox copies, not SMTP payloads.
+  compiled.keepBcc = true;
   return await new Promise<Buffer>((resolve, reject) => {
-    mail.compile().build((err, msg) =>
+    compiled.build((err, msg) =>
       err ? reject(err) : resolve(msg as Buffer),
     );
   });

@@ -180,6 +180,8 @@ export interface PostBackend {
   discardDraft(draftId: string): Promise<void>;
   scheduleDraft(draftId: string, at: number): Promise<void>;
   cancelScheduledDraft(draftId: string): Promise<void>;
+  uncertainDraftAttempts(draftId: string): Promise<{ sendLogId: string; messageIdHeader: string; createdAt: number; canConfirmDelivered: boolean; canConfirmNotDelivered: boolean }[]>;
+  resolveUncertainDraft(args: { draftId: string; sendLogId: string; outcome: "delivered" | "notDelivered"; confirmed: true }): Promise<{ outcome: "delivered" | "notDelivered" }>;
 
   setRead(targets: ThreadTargets, read: boolean): Promise<void>;
   setStarred(targets: ThreadTargets, starred: boolean): Promise<void>;
@@ -306,6 +308,8 @@ export function convexBackend(apiKey: string, convexUrl: string): PostBackend {
     scheduleDraft: (draftId, at) =>
       mutation("drafts:scheduleSend", { draftId, at }) as Promise<void>,
     cancelScheduledDraft: draftId => mutation("drafts:cancelScheduledSend", { draftId }) as Promise<void>,
+    uncertainDraftAttempts: draftId => query("send:uncertainDraftAttempts", { draftId }) as ReturnType<PostBackend["uncertainDraftAttempts"]>,
+    resolveUncertainDraft: args => mutation("send:resolveUncertainDraft", args) as ReturnType<PostBackend["resolveUncertainDraft"]>,
 
     setRead: (t, read) => mutation("mail:setRead", { ...t, read }) as Promise<void>,
     setStarred: (t, starred) =>

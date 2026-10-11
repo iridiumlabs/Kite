@@ -56,8 +56,8 @@ test("failures before SMTP are included in the global feedback subscription", as
   const t = makeT(); const accountId = await seedAccount(t, "a");
   const user = t.withIdentity({ subject: "a" });
   const draftId = await user.mutation(api.drafts.create, { accountId, to: [{ email: "to@x.com" }] });
-  await t.mutation(internal.send.claimDraftForSend, { draftId, userId: "a" });
-  await t.mutation(internal.send.failClaimedDraft, { draftId, error: "Attachment upload not found" });
+  const claimed = await t.mutation(internal.send.claimDraftForSend, { draftId, userId: "a" });
+  await t.mutation(internal.send.failClaimedDraft, { draftId, claimId: claimed!.sendClaimId!, error: "Attachment upload not found" });
   const result = await user.query(api.drafts.sendProblems, {});
   expect(result).toMatchObject([{ draftId, status: "failed", sendError: "Attachment upload not found" }]);
   expect(result[0]).not.toHaveProperty("attachments");

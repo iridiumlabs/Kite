@@ -223,6 +223,7 @@ export const update = mutation({
   args: {
     ...apiKeyArg,
     draftId: v.id("drafts"),
+    expectedDeliveryVersion: v.optional(v.number()),
     accountId: v.optional(v.id("accounts")),
     to: v.optional(v.array(addressV)),
     cc: v.optional(v.array(addressV)),
@@ -234,6 +235,7 @@ export const update = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
     const draft = await ownedDraft(ctx, userId, args.draftId);
+    if (args.expectedDeliveryVersion !== undefined && args.expectedDeliveryVersion !== (draft.deliveryVersion ?? 0)) throw new Error("Draft delivery changed. Review the updated recipients or reopen this draft.");
     const patch: Record<string, unknown> = {};
     if (args.accountId && args.accountId !== draft.accountId) {
       const account = await ctx.db.get(args.accountId);
