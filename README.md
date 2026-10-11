@@ -14,6 +14,12 @@ An Apple-inspired personal email client for multiple Spacemail IMAP/SMTP mailbox
 
 See `AGENTS.md` for the architecture, data-I/O rules and local dev-auth harness. Dev auth is test-only. Never enable `POST_DEV_AUTH`, `NEXT_PUBLIC_POST_DEV_AUTH` or `POST_DEV_AUTH_ISSUER` in production.
 
+## Profile and privacy
+
+General Settings lets you edit your name and upload/remove a profile photo. Production changes are saved to your Clerk account; enable first/last name editing in Clerk. The test-only dev-auth profile is explicitly browser-local. Profile photos are validated and rasterized before upload, stored by Clerk in production, and never placed in the mail database. Mailbox sender names remain separate in Connections.
+
+Remote images are off by default to limit email-open tracking. Embedded images and attachments still work. The default account controls new-message sending; choosing First account clears an explicit sender preference. Use the shared `components/ui/Select.tsx` for dropdowns, not native browser selects.
+
 ## Verification
 
 ```sh
@@ -27,6 +33,9 @@ Opt-in live suites require a local Convex backend at `127.0.0.1:3210`. They crea
 
 - `npx tsx scripts/live-e2e.ts`: wire-level sync, moves, flags, bodies, attachments, sending and cleanup.
 - `npx tsx scripts/live-ui-e2e.ts`: browser interaction, inline CID images, quotes, dialog layering, snooze, scheduling/cancellation, multiple mailboxes and responsive navigation. Requires Next dev at `localhost:3000` and the dev-auth harness.
+- `npx tsx scripts/live-appearance.ts`: focused profile/Settings/palette appearance persistence across navigation, reloads and fresh browser contexts, plus the current-origin MCP URL. Requires the local dev-auth harness and restores the test user's original theme.
+- `npx tsx scripts/live-compose-controls.ts`: repeated Compose clicks, minimized-window restoration, preserved editor text and borderless-field/keyboard focus styling. Requires the local dev-auth harness; never sends mail and discards only its own test draft.
+- `npx tsx scripts/live-profile-settings.ts`: dev profile editing/avatar validation and removal, styled dropdown/keyboard dismissal, switch layout and phone Settings. Restores modified mail preferences and changes only its isolated browser-local dev profile; no email is sent.
 - `npx tsx scripts/live-mcp.ts`: real HTTP MCP tool coverage. Set `POST_MCP_URL=http://localhost:3000` to reuse an existing Next server. The default starts its own server and requires that no other Next dev process holds the project's dev lock.
 - `npx tsx scripts/screenshots.ts`: fresh `/dev/preview` captures in `artifacts/screens/`, compared with the Paper exports in `design/`.
 
@@ -34,8 +43,8 @@ Live wire, MCP and browser suites use separate test owners. Artifacts, backend s
 
 ## Deployment
 
-Configure Clerk and Convex for production, deploy Convex functions and indexes, and provide the frontend Convex URL and Clerk keys to Vercel. Provide the encryption and Jev keys to Convex, not to the browser. Remove all dev-auth flags and the development JWT issuer before deploying.
+Follow [the Vercel deployment guide](DEPLOYMENT.md) for ordered Clerk/Convex setup, environment variables, the build command, production checks and MCP client configuration.
 
-Create a `post_sk_` key in Settings, then configure your MCP client to use `https://YOUR_HOST/api/mcp` with `Authorization: Bearer YOUR_KEY`. Post exposes 34 tools, including scheduled-send cancellation. Keys are shown once, stored hashed, and can be revoked in Settings.
+The MCP endpoint deploys with the app at `https://YOUR_HOST/api/mcp`. Settings displays the current site's origin, so localhost is expected while developing. Open Settings on your deployed site to get the production URL. Connect with a production `post_sk_` key using `Authorization: Bearer YOUR_KEY`. Post exposes 34 tools, including scheduled-send cancellation. Keys are shown once, stored hashed, and can be revoked in Settings.
 
 Message bodies and received attachments remain on IMAP, not in Convex. Reader content is cached in a bounded client-side cache. Fresh IMAP connections can still take several seconds; the reader supplies loading, timeout and retry feedback rather than retaining a permanent skeleton.

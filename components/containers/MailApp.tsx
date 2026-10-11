@@ -39,6 +39,7 @@ import { SettingsHost } from "./SettingsHost";
 import { ConnectAccountDialog } from "@/components/settings/ConnectAccountDialog";
 import { CategoryDialog } from "@/components/settings/CategoryDialog";
 import { useMailShortcuts } from "@/lib/ui/useShortcuts";
+import { useAppearance } from "@/lib/ui/useAppearance";
 import { PanelLeft } from "lucide-react";
 import { Dialog } from "@base-ui/react/dialog";
 import { SignOutListener } from "@/components/SignOutListener";
@@ -132,6 +133,7 @@ export function MailApp() {
   const router = useRouter();
   const { view, viewId, threadId } = parseSlug(params.slug);
   const { theme, setTheme, resolvedTheme } = useTheme();
+  const { setAppearance } = useAppearance();
   const appUser = useAppUser();
   const ui = useUI();
   const isNarrow = useMediaQuery("(max-width: 1099px)");
@@ -670,7 +672,7 @@ export function MailApp() {
         label: "Switch to dark theme",
         onSelect: () => {
           ui.setPaletteOpen(false);
-          setTheme("dark");
+          setAppearance("dark");
         },
       },
       {
@@ -678,11 +680,11 @@ export function MailApp() {
         label: "Switch to light theme",
         onSelect: () => {
           ui.setPaletteOpen(false);
-          setTheme("light");
+          setAppearance("light");
         },
       },
     ],
-    [ui, navigate, categoryInfos, accountInfos, syncNow, setTheme],
+    [ui, navigate, categoryInfos, accountInfos, syncNow, setAppearance],
   );
 
   // ---- empty states ----
@@ -728,12 +730,13 @@ export function MailApp() {
       user={{
         name: user.name,
         initial: user.initial,
+        imageUrl: appUser?.imageUrl,
         accountsConnected: accountInfos.length,
       }}
       profile={{
         theme: theme ?? "system",
         onOpenSettings: (tab) => ui.openSettings(tab as SettingsTab),
-        onSetTheme: setTheme,
+        onSetTheme: setAppearance,
         onSignOut: () => {
           if (DEV_AUTH) {
             toast("Sign out is disabled in dev mode");

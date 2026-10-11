@@ -401,11 +401,20 @@ body {
   font-size: 13px;
 }
 
-/* Focus visibility */
-:focus-visible {
-  outline: 2px solid var(--accent);
+/* Keyboard focus belongs on controls, not around borderless editing surfaces.
+   A blanket :focus-visible rule overrides the editor's outline-none because
+   browsers also match it for text editing after a pointer click. */
+:where(button, a[href], [role="button"], [role="menuitem"], [role="option"], select):focus-visible {
+  outline: 2px solid var(--text-secondary);
   outline-offset: -2px;
-  border-radius: 4px;
+}
+/* Rows and menu items use a quiet leading marker rather than a rectangle. */
+.mail-row:focus-visible,
+[role="menuitem"]:focus-visible,
+[role="option"]:focus-visible {
+  outline: none;
+  background: var(--hover-strong);
+  box-shadow: inset 3px 0 0 var(--text-secondary);
 }
 /* Floating surfaces and the palette input never show the container ring;
    items keep their own focus-visible styling */

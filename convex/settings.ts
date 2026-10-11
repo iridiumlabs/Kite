@@ -2,9 +2,10 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { requireUserId } from "./model/auth";
 import { apiKeyArg } from "./validators";
+import type { Doc } from "./_generated/dataModel";
 
-const DEFAULTS = {
-  theme: "system" as const,
+const DEFAULTS: Pick<Doc<"userSettings">, "theme" | "loadRemoteImages" | "undoSendSeconds"> = {
+  theme: "system",
   loadRemoteImages: false,
   undoSendSeconds: 5,
 };
@@ -29,7 +30,7 @@ export const update = mutation({
     ),
     loadRemoteImages: v.optional(v.boolean()),
     undoSendSeconds: v.optional(v.number()),
-    defaultAccountId: v.optional(v.id("accounts")),
+    defaultAccountId: v.optional(v.union(v.id("accounts"), v.null())),
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
@@ -45,7 +46,8 @@ export const update = mutation({
     if (args.undoSendSeconds !== undefined) {
       patch.undoSendSeconds = args.undoSendSeconds;
     }
-    if (args.defaultAccountId !== undefined) {
+    if (args.defaultAccountId === null) patch.defaultAccountId = undefined;
+    else if (args.defaultAccountId !== undefined) {
       const account = await ctx.db.get(args.defaultAccountId);
       if (!account || account.userId !== userId) {
         throw new Error("Account not found");

@@ -63,7 +63,7 @@ export function ProfileMenu(p: ProfileMenuProps) {
   return (
     <Menu.Root defaultOpen={p.defaultOpen}>
       <Menu.Trigger className="flex items-center h-8 pr-2 pl-1.5 rounded-[7px] gap-2 w-full text-left mail-row cursor-default select-none outline-none">
-        <Avatar name={p.user.name} self size={22} rounded="md" />
+        <Avatar name={p.user.name} imageUrl={p.user.imageUrl} self size={22} rounded="md" />
         <div className="tracking-[-0.005em] font-semibold text-primary text-[13px]/4 line-clamp-1 min-w-0">
           {p.user.name}
         </div>
@@ -81,9 +81,9 @@ export function ProfileMenu(p: ProfileMenuProps) {
             style={{ boxShadow: "var(--shadow-menu)" }}
           >
             <div className="flex items-center pt-2 pb-2.5 gap-2.5 px-2">
-              <Avatar name={p.user.name} self size={30} rounded="md" />
-              <div className="flex flex-col gap-px">
-                <div className="font-semibold text-primary text-[13px]/4">
+              <Avatar name={p.user.name} imageUrl={p.user.imageUrl} self size={30} rounded="md" />
+              <div className="flex flex-col gap-px min-w-0">
+                <div className="font-semibold text-primary text-[13px]/4 truncate">
                   {p.user.name}
                 </div>
                 <div className="text-tertiary text-xs/4">

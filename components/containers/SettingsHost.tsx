@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import { Switch } from "@base-ui/react/switch";
 import { toast } from "sonner";
-import { useTheme } from "next-themes";
+import { useAppearance } from "@/lib/ui/useAppearance";
 import { useUI, type SettingsTab } from "@/lib/ui/store";
 import type { AccountInfo, CategoryInfo } from "@/lib/ui/types";
 import {
@@ -18,6 +18,8 @@ import {
   vscodeConfig,
 } from "@/lib/mcp/clientConfigs";
 import { CategoryDialog } from "@/components/settings/CategoryDialog";
+import { ProfileEditor } from "@/components/settings/ProfileEditor";
+import { Select } from "@/components/ui/Select";
 import {
   Settings as SettingsIcon,
   Cable,
@@ -58,15 +60,20 @@ function Row({
 function Toggle({
   checked,
   onChange,
+  label,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
+  label: string;
 }) {
   return (
     <Switch.Root
+      render={<button type="button" />}
+      nativeButton
       checked={checked}
+      aria-label={label}
       onCheckedChange={onChange}
-      className="w-9 h-5.5 rounded-full bg-[#0000001F] dark:bg-[#FFFFFF29] data-[checked]:bg-accent transition-colors relative"
+      className="inline-flex shrink-0 w-9 h-5.5 rounded-full bg-[#0000001F] dark:bg-[#FFFFFF29] data-[checked]:bg-accent transition-colors relative"
     >
       <Switch.Thumb className="absolute top-0.5 left-0.5 size-4.5 rounded-full bg-white shadow transition-transform data-[checked]:translate-x-3.5" />
     </Switch.Root>
@@ -98,13 +105,15 @@ function GeneralTab() {
     return <div className="skeleton h-40 w-full rounded-lg" />;
   return (
     <div>
+      <ProfileEditor />
       <Row
-        label="Load remote images"
-        hint="Images in emails can reveal when you open a message."
+        label="Automatically load remote images"
+        hint="External images can tell senders when you open mail. Off protects your privacy."
       >
         <Toggle
+          label="Automatically load remote images"
           checked={settings.loadRemoteImages}
-          onChange={(v) => void update({ loadRemoteImages: v })}
+          onChange={(v) => void update({ loadRemoteImages: v }).catch(() => toast.error("Could not save image preference."))}
         />
       </Row>
       <Row label="Undo send" hint="Delay before a sent message leaves Post.">
@@ -125,26 +134,13 @@ function GeneralTab() {
         </div>
       </Row>
       <Row label="Default account" hint="Used for new messages.">
-        <select
-          value={
-            (settings as { defaultAccountId?: string }).defaultAccountId ?? ""
-          }
-          onChange={(e) =>
-            void update({
-              defaultAccountId: (e.target.value || undefined) as
-                | Id<"accounts">
-                | undefined,
-            })
-          }
-          className="h-8 px-2 rounded-lg bg-search-field text-primary text-[13px]/4 outline-none"
-        >
-          <option value="">First account</option>
-          {(accounts ?? []).map((a) => (
-            <option key={a._id} value={a._id}>
-              {a.email}
-            </option>
-          ))}
-        </select>
+        <Select
+          label="Default account"
+          value={("defaultAccountId" in settings ? settings.defaultAccountId : undefined) ?? ""}
+          disabled={accounts === undefined}
+          options={[{ value: "", label: "First account" }, ...(accounts ?? []).map(account => ({ value: account._id, label: account.email }))]}
+          onChange={value => void update({ defaultAccountId: value ? value as Id<"accounts"> : null }).catch(() => toast.error("Could not save default account."))}
+        />
       </Row>
     </div>
   );
@@ -387,8 +383,7 @@ function CategoriesTab({ categories }: { categories: CategoryInfo[] }) {
 }
 
 function AppearanceTab() {
-  const { theme, setTheme } = useTheme();
-  const update = useMutation(api.settings.update);
+  const { theme, setAppearance } = useAppearance();
   const options = [
     { id: "light", label: "Light" },
     { id: "dark", label: "Dark" },
@@ -399,10 +394,7 @@ function AppearanceTab() {
       {options.map((o) => (
         <button
           key={o.id}
-          onClick={() => {
-            setTheme(o.id);
-            void update({ theme: o.id }).catch(() => {});
-          }}
+          onClick={() => setAppearance(o.id)}
           className={`pressable flex flex-col items-center gap-2 p-3 rounded-xl border w-28 ${
             theme === o.id ? "border-accent" : "border-divider"
           }`}
@@ -499,6 +491,11 @@ function ApiKeysTab() {
           <code className="grow text-primary text-xs truncate">{url}</code>
           <CopyButton text={url} />
         </div>
+        <p className="mt-2 text-tertiary text-xs/4">
+          This URL follows the site you are using. After deployment, open Settings
+          on your production domain to copy its MCP URL. Connect using a Post API
+          key as a Bearer token.
+        </p>
       </div>
 
       {newKey && (
@@ -720,10 +717,12 @@ export function SettingsHost({
       <Dialog.Portal>
         <Dialog.Backdrop className="dialog-backdrop fixed inset-0 z-[60] bg-black/25" />
         <Dialog.Popup className="dialog-popup fixed left-1/2 top-1/2 z-[61] w-176 max-w-[94vw] h-[min(36rem,88vh)] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-app menu-shadow ring-1 ring-menu-ring overflow-clip flex">
-          <div className="w-44 shrink-0 bg-sidebar border-r border-sidebar-border p-2 pt-4 flex flex-col gap-0.5">
+          <div className="w-14 sm:w-44 shrink-0 bg-sidebar border-r border-sidebar-border p-2 pt-4 flex flex-col gap-0.5">
             {TABS.map((t) => (
               <button
                 key={t.id}
+                aria-label={t.label}
+                title={t.label}
                 onClick={() => ui.openSettings(t.id)}
                 className={`pressable flex items-center gap-2 h-8 px-2.5 rounded-lg text-[13px]/4 text-left ${
                   tab === t.id
@@ -732,7 +731,7 @@ export function SettingsHost({
                 }`}
               >
                 {t.icon}
-                {t.label}
+                <span className="hidden sm:inline">{t.label}</span>
               </button>
             ))}
           </div>

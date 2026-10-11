@@ -83,6 +83,7 @@ export interface MessageContent {
 export interface UserInfo {
   name: string;
   initial: string;
+  imageUrl?: string;
   accountsConnected: number;
 }
 

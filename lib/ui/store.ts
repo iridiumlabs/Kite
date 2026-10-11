@@ -57,7 +57,7 @@ interface UIState {
 
 let composeSeq = 0;
 
-export const useUI = create<UIState>((set) => ({
+export const useUI = create<UIState>((set, get) => ({
   paletteOpen: false,
   setPaletteOpen: (v) => set({ paletteOpen: v }),
   settingsOpen: false,
@@ -73,6 +73,18 @@ export const useUI = create<UIState>((set) => ({
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
   compose: [],
   openCompose: (opts) => {
+    const existing = get().compose.find(w =>
+      opts.mode === "new" ? w.mode === "new"
+        : opts.mode === "draft" ? !!opts.draftId && w.draftId === opts.draftId
+        : !!opts.replyToMessageId && w.mode === opts.mode && w.replyToMessageId === opts.replyToMessageId);
+    if (existing) {
+      // Reuse the mounted editor and its unsaved content, restore it if needed,
+      // and bring it to the rightmost/front position instead of stacking copies.
+      set(s => ({
+        compose: [...s.compose.filter(w => w.id !== existing.id), { ...existing, minimized: false }],
+      }));
+      return existing.id;
+    }
     const id = `compose-${++composeSeq}`;
     set((s) => ({
       compose: [

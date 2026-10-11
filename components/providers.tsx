@@ -10,7 +10,9 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
+import { avatarDataUrl, clerkProfileActions, DEFAULT_DEV_PROFILE, DEV_PROFILE_EVENT, DEV_PROFILE_KEY, profileNames, readDevProfile, validateAvatar, type ProfileFields } from "@/lib/ui/profile";
 
 export const DEV_AUTH = process.env.NEXT_PUBLIC_POST_DEV_AUTH === "1";
 
@@ -75,23 +77,59 @@ export interface AppUser {
   initial: string;
   imageUrl?: string;
   isDev?: boolean;
+  firstName: string;
+  lastName: string;
+  updateName: (firstName: string, lastName: string) => Promise<void>;
+  updateImage: (file: File | null) => Promise<void>;
 }
 
-export function useAppUser(): AppUser | undefined {
-  if (DEV_AUTH) {
-    return { name: "Dev user", initial: "D", isDev: true };
-  }
-  // eslint-disable-next-line react-hooks/rules-of-hooks
+function useClerkAppUser(): AppUser | undefined {
   const { user } = useUser();
   if (!user) return undefined;
-  const name =
-    user.fullName ?? user.primaryEmailAddress?.emailAddress ?? "Account";
+  const name = user.fullName || user.primaryEmailAddress?.emailAddress || "Account";
   return {
     name,
     initial: name.slice(0, 1).toUpperCase(),
-    imageUrl: user.imageUrl ?? undefined,
+    imageUrl: user.hasImage ? user.imageUrl : undefined,
+    firstName: user.firstName ?? "",
+    lastName: user.lastName ?? "",
+    ...clerkProfileActions(user),
   };
 }
+
+const DEV_PROFILE_JSON = JSON.stringify(DEFAULT_DEV_PROFILE);
+function devSnapshot() {
+  try { return localStorage.getItem(DEV_PROFILE_KEY) ?? DEV_PROFILE_JSON; }
+  catch { return DEV_PROFILE_JSON; }
+}
+function subscribeDevProfile(onChange: () => void) {
+  window.addEventListener("storage", onChange);
+  window.addEventListener(DEV_PROFILE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(DEV_PROFILE_EVENT, onChange);
+  };
+}
+function saveDevProfile(patch: Partial<ProfileFields>) {
+  localStorage.setItem(DEV_PROFILE_KEY, JSON.stringify({ ...readDevProfile(devSnapshot()), ...patch }));
+  window.dispatchEvent(new Event(DEV_PROFILE_EVENT));
+}
+function useDevAppUser(): AppUser {
+  const raw = useSyncExternalStore(subscribeDevProfile, devSnapshot, () => DEV_PROFILE_JSON);
+  const profile = readDevProfile(raw);
+  const name = `${profile.firstName} ${profile.lastName}`.trim();
+  return {
+    ...profile, name, initial: name[0].toUpperCase(), isDev: true,
+    updateName: async (firstName, lastName) => { saveDevProfile(profileNames(firstName, lastName)); },
+    updateImage: async file => {
+      if (file) validateAvatar(file);
+      saveDevProfile({ imageUrl: file ? await avatarDataUrl(file) : undefined });
+    },
+  };
+}
+
+// The auth mode is fixed at build time, not a conditional hook at render time.
+export const useAppUser = DEV_AUTH ? useDevAppUser : useClerkAppUser;
 
 export function Providers({ children }: { children: ReactNode }) {
   if (DEV_AUTH) {
