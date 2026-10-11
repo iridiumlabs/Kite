@@ -137,12 +137,13 @@ export function makeStorePort(ctx: Ctx, accountId: Id<"accounts">): StorePort {
         opId: opId as Id<"pendingOps">,
       });
     },
-    async failOp(opId, error, nextAttemptAt, drop) {
+    async failOp(opId, error, nextAttemptAt, drop, waiting) {
       await ctx.runMutation(internal.syncStore.failOp, {
         opId: opId as Id<"pendingOps">,
         error,
         nextAttemptAt,
         drop,
+        waiting,
       });
     },
     async threadContexts(items) {

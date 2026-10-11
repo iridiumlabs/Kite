@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import {
   action,
   mutation,
@@ -7,6 +7,7 @@ import {
   internalMutation,
   internalQuery,
   type ActionCtx,
+  type MutationCtx,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
@@ -14,7 +15,7 @@ import { requireUserId } from "./model/auth";
 import { ingestMessage, buildSearchText } from "./model/ingest";
 import { recomputeThread } from "./model/threads";
 import { enqueueOp } from "./model/pendingOps";
-import { addressV } from "./validators";
+import { addressV, sendCompletionArgs, sendCompletionV } from "./validators";
 import {
   replyRecipients,
   threadingHeaders,
@@ -27,7 +28,7 @@ import {
 import { sendContentHash } from "./lib/idempotency";
 import type { Address } from "./lib/types";
 import { removeDraft } from "./model/draftCleanup";
-import { uncertainResolutionOptions } from "./lib/uncertainSend";
+import { UNCERTAIN_STALE_MS, uncertainResolutionOptions } from "./lib/uncertainSend";
 
 const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 const ATTACHMENT_TOTAL_MAX = 25 * 1024 * 1024;
@@ -37,6 +38,7 @@ const apiKeyArg = { apiKey: v.optional(v.string()) };
 const sendAttachmentV = v.union(
   v.object({
     storageId: v.id("_storage"),
+    size: v.optional(v.number()),
     filename: v.optional(v.string()),
     contentType: v.optional(v.string()),
   }),
@@ -108,175 +110,155 @@ export const beginSend = internalMutation({
 });
 
 export const completeSend = internalMutation({
-  args: {
-    sendLogId: v.id("sendLog"),
-    accountId: v.id("accounts"),
-    draftId: v.optional(v.id("drafts")),
-    replyToMessageDocId: v.optional(v.id("messages")),
-    sentFolderId: v.optional(v.id("folders")),
-    sentUid: v.optional(v.number()),
-    messageIdHeader: v.string(),
-    inReplyTo: v.optional(v.string()),
-    references: v.array(v.string()),
-    subject: v.string(),
-    from: addressV,
-    to: v.array(addressV),
-    cc: v.array(addressV),
-    bcc: v.array(addressV),
-    rejectedRecipients: v.optional(v.array(v.string())),
-    text: v.string(),
-    attachments: v.array(
-      v.object({
-        id: v.string(),
-        filename: v.string(),
-        contentType: v.string(),
-        size: v.number(),
-        cid: v.optional(v.string()),
-        inline: v.boolean(),
-      }),
-    ),
-    sourceStorageId: v.optional(v.id("_storage")),
-  },
-  handler: async (ctx, args) => {
-    const log = await ctx.db.get(args.sendLogId);
-    if (!log) throw new Error("Send log not found");
-    if (log.resolution === "notDelivered") throw new Error("This send was resolved as not delivered");
-    if (log.resolution === "delivered" || (log.status === "sent" && log.messageId)) {
-      return { messageId: log.messageId, deduped: true, ...(log.rejectedRecipients?.length ? { rejectedRecipients: log.rejectedRecipients } : {}) };
-    }
-
-    const inserted = await ingestMessage(ctx, {
-      userId: log.userId,
-      accountId: args.accountId,
-      folderId: args.sentFolderId ?? null,
-      folderRole: "sent",
-      uid: args.sentUid,
-      sourceStorageId: args.sourceStorageId,
-      messageIdHeader: args.messageIdHeader,
-      inReplyTo: args.inReplyTo,
-      references: args.references.slice(-30),
-      subject: args.subject,
-      from: args.from,
-      to: args.to,
-      cc: args.cc,
-      bcc: args.bcc,
-      replyTo: [],
-      date: Date.now(),
-      snippet: args.text.slice(0, 240),
-      seen: true,
-      flagged: false,
-      answered: false,
-      isOutbound: true,
-      hasAttachments: args.attachments.length > 0,
-      attachments: args.attachments.slice(0, 25),
-    });
-
-    if (args.sourceStorageId && args.sentUid === undefined) {
-      await ctx.scheduler.runAfter(0, internal.node.sendOps.retrySentAppend, {
-        messageId: inserted.messageId,
-        sourceStorageId: args.sourceStorageId,
-        accountId: args.accountId,
-        messageIdHeader: args.messageIdHeader,
-        attempt: 1,
-      });
-    }
-
-    if (args.rejectedRecipients?.length) {
-      // A sync may have ingested the raw Sent headers before completion.
-      // Record only accepted envelope recipients in the local delivery record.
-      await ctx.db.patch(inserted.messageId, {
-        to: args.to, cc: args.cc, bcc: args.bcc,
-        searchText: buildSearchText({ ...args, snippet: args.text.slice(0, 240) }),
-      });
-      await recomputeThread(ctx, inserted.threadId);
-    }
-
-    if (args.replyToMessageDocId) {
-      const original = await ctx.db.get(args.replyToMessageDocId);
-      if (original) {
-        const folder = original.folderId
-          ? await ctx.db.get(original.folderId)
-          : null;
-        if (original.uid !== undefined && folder) {
-          await enqueueOp(ctx, {
-            userId: log.userId,
-            accountId: original.accountId,
-            kind: "flags",
-            payload: {
-              updates: [
-                {
-                  folderPath: folder.path,
-                  uid: original.uid,
-                  add: ["\\Answered"],
-                  remove: [],
-                  messageId: original._id,
-                },
-              ],
-            },
-          });
-        }
-      }
-    }
-
-    if (args.draftId) {
-      const draft = await ctx.db.get(args.draftId);
-      if (draft && (!draft.sendLogId || draft.sendLogId === args.sendLogId)) {
-        for (const att of draft.attachments) {
-          if (!args.rejectedRecipients?.length && att.kind === "upload") {
-            await ctx.storage.delete(att.storageId).catch(() => {});
-          }
-        }
-        if (draft.remoteUid !== undefined && draft.remoteFolderId) {
-          const folder = await ctx.db.get(draft.remoteFolderId);
-          if (folder) {
-            await enqueueOp(ctx, {
-              userId: draft.userId,
-              accountId: draft.accountId,
-              kind: "deleteRemoteDraft",
-              payload: { folderPath: folder.path, uid: draft.remoteUid },
-            });
-          }
-        }
-        if (args.rejectedRecipients?.length) {
-          const rejected = new Set(args.rejectedRecipients.map(email => email.toLowerCase()));
-          const account = await ctx.db.get(draft.accountId);
-          const jobAt = Date.now() + 30_000;
-          await ctx.db.patch(draft._id, {
-            to: draft.to.filter(a => rejected.has(a.email.toLowerCase())),
-            cc: draft.cc.filter(a => rejected.has(a.email.toLowerCase())),
-            bcc: draft.bcc.filter(a => rejected.has(a.email.toLowerCase())),
-            status: "failed",
-            deliveryVersion: (draft.deliveryVersion ?? 0) + 1,
-            sendError: `Partially delivered. Not accepted: ${args.rejectedRecipients.join(", ")}. This draft contains only undelivered recipients.`.slice(0, 500),
-            sendErrorAt: Date.now(), updatedAt: Date.now(),
-            messageIdHeader: newMessageId(account?.email ?? args.from.email),
-            remoteUid: undefined, remoteFolderId: undefined,
-            remoteDirty: true, pushScheduledAt: jobAt,
-          });
-          await ctx.scheduler.runAt(jobAt, internal.node.draftsOps.pushDraftNow, { draftId: draft._id });
-        } else {
-          await ctx.db.delete(args.draftId);
-          const counter = await ctx.db
-            .query("counters")
-            .withIndex("by_user_key", (q) =>
-              q.eq("userId", draft.userId).eq("key", "drafts"),
-            )
-            .first();
-          if (counter && counter.count > 0) {
-            await ctx.db.patch(counter._id, { count: counter.count - 1 });
-          }
-        }
-      }
-    }
-
-    await ctx.db.patch(args.sendLogId, {
-      status: "sent",
-      messageId: inserted.messageId,
-      rejectedRecipients: args.rejectedRecipients,
-    });
-    return { messageId: inserted.messageId, deduped: false, ...(args.rejectedRecipients?.length ? { rejectedRecipients: args.rejectedRecipients } : {}) };
-  },
+  args: sendCompletionArgs,
+  handler: finalizeSend,
 });
+
+async function finalizeSend(ctx: MutationCtx, args: Infer<typeof sendCompletionV>) {
+  const log = await ctx.db.get(args.sendLogId);
+  if (!log) throw new Error("Send log not found");
+  if (log.resolution === "notDelivered") throw new Error("This send was resolved as not delivered");
+  if (log.resolution === "delivered" || (log.status === "sent" && log.messageId)) {
+    return { messageId: log.messageId, deduped: true, ...(log.rejectedRecipients?.length ? { rejectedRecipients: log.rejectedRecipients } : {}) };
+  }
+
+  // Sync may have found the provider-filed Sent copy while SMTP finalization
+  // was interrupted. Reuse it instead of inserting another local placeholder.
+  const remoteCopies = args.sentUid === undefined ? await ctx.db.query("messages").withIndex("by_account_msgid", q => q.eq("accountId", args.accountId).eq("messageIdHeader", args.messageIdHeader)).collect() : [];
+  const remoteSent = remoteCopies.find(m => m.folderRole === "sent" && m.uid !== undefined && m.folderId);
+  const sentUid = args.sentUid ?? remoteSent?.uid;
+  const sentFolderId = args.sentFolderId ?? remoteSent?.folderId;
+  const inserted = await ingestMessage(ctx, {
+    userId: log.userId,
+    accountId: args.accountId,
+    folderId: sentFolderId ?? null,
+    folderRole: "sent",
+    uid: sentUid,
+    sourceStorageId: sentUid === undefined ? args.sourceStorageId : undefined,
+    messageIdHeader: args.messageIdHeader,
+    inReplyTo: args.inReplyTo,
+    references: args.references.slice(-30),
+    subject: args.subject,
+    from: args.from,
+    to: args.to,
+    cc: args.cc,
+    bcc: args.bcc,
+    replyTo: [],
+    date: Date.now(),
+    snippet: args.text.slice(0, 240),
+    seen: true,
+    flagged: false,
+    answered: false,
+    isOutbound: true,
+    hasAttachments: args.attachments.length > 0,
+    attachments: args.attachments.slice(0, 25),
+  });
+
+  if (args.sourceStorageId && sentUid === undefined) {
+    await ctx.scheduler.runAfter(0, internal.node.sendOps.retrySentAppend, {
+      messageId: inserted.messageId,
+      sourceStorageId: args.sourceStorageId,
+      accountId: args.accountId,
+      messageIdHeader: args.messageIdHeader,
+      attempt: 1,
+    });
+  }
+
+  // A sync may have ingested the raw Sent headers before completion.
+  // Accepted envelope recipients (including private Bcc) are authoritative.
+  await ctx.db.patch(inserted.messageId, {
+    to: args.to, cc: args.cc, bcc: args.bcc, deliveryRecipientsRecorded: true,
+    searchText: buildSearchText({ ...args, snippet: args.text.slice(0, 240) }),
+  });
+  await recomputeThread(ctx, inserted.threadId);
+
+  if (args.replyToMessageDocId) {
+    const original = await ctx.db.get(args.replyToMessageDocId);
+    if (original) {
+      const folder = original.folderId
+        ? await ctx.db.get(original.folderId)
+        : null;
+      if (original.uid !== undefined && folder) {
+        await enqueueOp(ctx, {
+          userId: log.userId,
+          accountId: original.accountId,
+          kind: "flags",
+          payload: {
+            updates: [
+              {
+                folderPath: folder.path,
+                uid: original.uid,
+                add: ["\\Answered"],
+                remove: [],
+                messageId: original._id,
+              },
+            ],
+          },
+        });
+      }
+    }
+  }
+
+  if (args.draftId) {
+    const draft = await ctx.db.get(args.draftId);
+    if (draft && (!draft.sendLogId || draft.sendLogId === args.sendLogId)) {
+      for (const att of draft.attachments) {
+        if (!args.rejectedRecipients?.length && att.kind === "upload") {
+          await ctx.storage.delete(att.storageId).catch(() => {});
+        }
+      }
+      if (draft.remoteUid !== undefined && draft.remoteFolderId) {
+        const folder = await ctx.db.get(draft.remoteFolderId);
+        if (folder) {
+          await enqueueOp(ctx, {
+            userId: draft.userId,
+            accountId: draft.accountId,
+            kind: "deleteRemoteDraft",
+            payload: { folderPath: folder.path, uid: draft.remoteUid },
+          });
+        }
+      }
+      if (args.rejectedRecipients?.length) {
+        const rejected = new Set(args.rejectedRecipients.map(email => email.toLowerCase()));
+        const account = await ctx.db.get(draft.accountId);
+        const jobAt = Date.now() + 30_000;
+        await ctx.db.patch(draft._id, {
+          to: draft.to.filter(a => rejected.has(a.email.toLowerCase())),
+          cc: draft.cc.filter(a => rejected.has(a.email.toLowerCase())),
+          bcc: draft.bcc.filter(a => rejected.has(a.email.toLowerCase())),
+          status: "failed",
+          deliveryVersion: (draft.deliveryVersion ?? 0) + 1,
+          sendError: `Partially delivered. Not accepted: ${args.rejectedRecipients.join(", ")}. This draft contains only undelivered recipients.`.slice(0, 500),
+          sendErrorAt: Date.now(), updatedAt: Date.now(),
+          messageIdHeader: newMessageId(account?.email ?? args.from.email),
+          remoteUid: undefined, remoteFolderId: undefined,
+          remoteDirty: true, pushScheduledAt: jobAt,
+        });
+        await ctx.scheduler.runAt(jobAt, internal.node.draftsOps.pushDraftNow, { draftId: draft._id });
+      } else {
+        await ctx.db.delete(args.draftId);
+        const counter = await ctx.db
+          .query("counters")
+          .withIndex("by_user_key", (q) =>
+            q.eq("userId", draft.userId).eq("key", "drafts"),
+          )
+          .first();
+        if (counter && counter.count > 0) {
+          await ctx.db.patch(counter._id, { count: counter.count - 1 });
+        }
+      }
+    }
+  }
+
+  await ctx.db.patch(args.sendLogId, {
+    status: "sent",
+    messageId: inserted.messageId,
+    rejectedRecipients: args.rejectedRecipients,
+    recovery: undefined,
+  });
+  if (args.sourceStorageId && sentUid !== undefined) await ctx.storage.delete(args.sourceStorageId).catch(() => {});
+  return { messageId: inserted.messageId, deduped: false, ...(args.rejectedRecipients?.length ? { rejectedRecipients: args.rejectedRecipients } : {}) };
+}
 
 export const recordSentAppendSuccess = internalMutation({
   args: {
@@ -304,11 +286,12 @@ export const recordSentAppendSuccess = internalMutation({
 // Persist before touching SMTP: a transport/action failure can hide acceptance.
 // Only definite rejections or explicit user-confirmed resolution can release it.
 export const markSendUncertain = internalMutation({
-  args: { sendLogId: v.id("sendLog"), draftId: v.optional(v.id("drafts")) },
+  args: { sendLogId: v.id("sendLog"), draftId: v.optional(v.id("drafts")), recovery: v.optional(sendCompletionV) },
   handler: async (ctx, args) => {
     const log = await ctx.db.get(args.sendLogId);
     if (!log || log.status !== "sending") throw new Error("Send is not reserved");
-    await ctx.db.patch(log._id, { status: "uncertain", uncertainSince: Date.now() });
+    await ctx.db.patch(log._id, { status: "uncertain", uncertainSince: Date.now(), recovery: args.recovery });
+    if (args.recovery) await ctx.scheduler.runAfter(UNCERTAIN_STALE_MS, internal.send.recoverAcceptedSend, { sendLogId: log._id });
     if (args.draftId) {
       const draft = await ctx.db.get(args.draftId);
       if (draft && (!draft.sendLogId || draft.sendLogId === args.sendLogId)) {
@@ -330,9 +313,12 @@ export const failSend = internalMutation({
     const log = await ctx.db.get(args.sendLogId);
     const active = log && !log.resolution && (log.status === "sending" || log.status === "uncertain");
     if (active) {
+      const rejected = log.status !== "uncertain" || args.definiteRejection;
+      if (rejected && log.recovery?.sourceStorageId) await ctx.storage.delete(log.recovery.sourceStorageId).catch(() => {});
       await ctx.db.patch(args.sendLogId, {
         status: log.status === "uncertain" && !args.definiteRejection ? "uncertain" : "failed",
         error: args.error.slice(0, 500),
+        recovery: rejected ? undefined : log.recovery,
       });
     }
     if (args.draftId) {
@@ -356,6 +342,26 @@ export const finishSmtpAttempt = internalMutation({
     if (log?.status === "uncertain" && !log.resolution) await ctx.db.patch(log._id, {
       attemptFinishedAt: Date.now(), smtpAcceptedAt: args.accepted ? (log.smtpAcceptedAt ?? Date.now()) : log.smtpAcceptedAt,
       rejectedRecipients: args.accepted ? args.rejectedRecipients : log.rejectedRecipients,
+    });
+  },
+});
+
+// Scheduled atomically before SMTP. Once acceptance is known, recovery can
+// finalize from durable metadata/raw MIME without repeating SMTP.
+export const recoverAcceptedSend = internalMutation({
+  args: { sendLogId: v.id("sendLog") },
+  handler: async (ctx, args) => {
+    const log = await ctx.db.get(args.sendLogId);
+    if (!log || log.status !== "uncertain" || log.resolution || !log.recovery) return;
+    if (log.smtpAcceptedAt === undefined) return;
+    const rejected = new Set((log.rejectedRecipients ?? []).map(email => email.toLowerCase()));
+    const completion = log.recovery;
+    return await finalizeSend(ctx, {
+      ...completion,
+      to: completion.to.filter(a => !rejected.has(a.email.toLowerCase())),
+      cc: completion.cc.filter(a => !rejected.has(a.email.toLowerCase())),
+      bcc: completion.bcc.filter(a => !rejected.has(a.email.toLowerCase())),
+      rejectedRecipients: log.rejectedRecipients,
     });
   },
 });
@@ -402,10 +408,19 @@ export const resolveUncertainSend = mutation({
     if (log.status !== "uncertain") throw new Error("This delivery is no longer uncertain");
     const options = uncertainResolutionOptions(log, Date.now());
     if (!(args.outcome === "delivered" ? options.canConfirmDelivered : options.canConfirmNotDelivered)) throw new Error("This send is still active or has known delivery; wait for finalization");
+    if (args.outcome === "delivered" && log.recovery) {
+      await finalizeSend(ctx, log.recovery);
+      await ctx.db.patch(log._id, { resolution: "delivered", resolvedAt: Date.now() });
+      return { outcome: args.outcome };
+    }
+    if (args.outcome === "notDelivered" && log.recovery?.sourceStorageId) {
+      await ctx.storage.delete(log.recovery.sourceStorageId);
+    }
     const sent = args.outcome === "delivered" ? await ctx.db.query("messages").withIndex("by_account_msgid", q => q.eq("accountId", log.accountId).eq("messageIdHeader", log.messageIdHeader)).first() : null;
     await ctx.db.patch(log._id, {
       status: args.outcome === "delivered" ? "sent" : "failed", resolution: args.outcome, resolvedAt: Date.now(),
       messageId: sent?.folderRole === "sent" ? sent._id : log.messageId,
+      recovery: undefined,
       error: args.outcome === "notDelivered" ? "User confirmed non-delivery. Use a new idempotency key to retry." : undefined,
     });
     return { outcome: args.outcome };
@@ -423,8 +438,16 @@ export const resolveUncertainDraft = mutation({
     if (draft.status !== "uncertain" || log.status !== "uncertain") throw new Error("This delivery is no longer uncertain");
     const options = uncertainResolutionOptions(log, Date.now());
     if (!(args.outcome === "delivered" ? options.canConfirmDelivered : options.canConfirmNotDelivered)) throw new Error("This send is still active or has known delivery; wait for finalization");
+    if (args.outcome === "delivered" && log.recovery) {
+      await finalizeSend(ctx, log.recovery);
+      await ctx.db.patch(log._id, { resolution: "delivered", resolvedAt: Date.now() });
+      return { outcome: args.outcome };
+    }
+    if (args.outcome === "notDelivered" && log.recovery?.sourceStorageId) {
+      await ctx.storage.delete(log.recovery.sourceStorageId);
+    }
     await ctx.db.patch(log._id, {
-      status: args.outcome === "delivered" ? "sent" : "failed", resolution: args.outcome, resolvedAt: Date.now(), draftId: draft._id,
+      status: args.outcome === "delivered" ? "sent" : "failed", resolution: args.outcome, resolvedAt: Date.now(), draftId: draft._id, recovery: undefined,
       error: args.outcome === "notDelivered" ? "User confirmed non-delivery. Use a new idempotency key to retry." : undefined,
     });
     if (args.outcome === "delivered") {
@@ -508,7 +531,16 @@ async function executeSend(
 ): Promise<SendOutcome> {
   if (args.to.length + args.cc.length + args.bcc.length === 0) throw new Error("Add at least one recipient before sending");
   const text = args.text ?? (args.html ? htmlToText(args.html) : "");
-  const estBytes = args.attachmentForHash.reduce((s, a) => s + a.size, 0);
+  const attachmentForHash = await Promise.all(args.attachmentForHash.map(async (entry, i) => {
+    const att = args.performArgs.attachments?.[i];
+    if (att && "storageId" in att) {
+      const metadata = await ctx.runQuery(internal.send.storageMetadata, { storageId: att.storageId });
+      if (!metadata) throw new Error("Attachment upload not found");
+      return { ...entry, size: metadata.size };
+    }
+    return entry;
+  }));
+  const estBytes = attachmentForHash.reduce((s, a) => s + a.size, 0);
   if (estBytes > ATTACHMENT_TOTAL_MAX) {
     throw new Error("Attachments exceed the 25 MB limit.");
   }
@@ -520,7 +552,7 @@ async function executeSend(
     subject: args.subject,
     text,
     html: args.html,
-    attachments: args.attachmentForHash,
+    attachments: attachmentForHash,
   });
   const account: Doc<"accounts"> | null = await ctx.runQuery(
     internal.send.accountForSend,
@@ -596,6 +628,9 @@ async function executeSend(
         const storageId = await ctx.storage.store(new Blob([bytes], { type: att.contentType }));
         await ctx.scheduler.runAfter(24 * 60 * 60 * 1000, internal.send.deleteTemporaryAttachment, { storageId });
         attachments.push({ storageId, filename: att.filename, contentType: att.contentType });
+      } else if ("storageId" in att) {
+        // Public upload metadata is for hashing; do not forward extra fields to Node.
+        attachments.push({ storageId: att.storageId, filename: att.filename, contentType: att.contentType });
       } else attachments.push(att);
     }
     const res: {
@@ -629,6 +664,14 @@ async function executeSend(
     throw new Error(msg);
   }
 }
+
+export const storageMetadata = internalQuery({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    const metadata = await ctx.db.system.get(args.storageId);
+    return metadata ? { size: metadata.size } : null;
+  },
+});
 
 export const deleteTemporaryAttachment = internalMutation({
   args: { storageId: v.id("_storage") },

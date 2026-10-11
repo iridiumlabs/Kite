@@ -27,7 +27,7 @@ export async function uploadSendAttachments(
     });
     if (!response.ok) throw new Error("Attachment upload failed");
     const { storageId } = await response.json() as { storageId: string };
-    refs.push({ storageId, filename: att.filename, contentType: att.contentType });
+    refs.push({ storageId, filename: att.filename, contentType: att.contentType, size: bytes.length });
   }
   return refs;
 }

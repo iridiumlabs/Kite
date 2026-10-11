@@ -946,13 +946,15 @@ export async function runPendingOps(
       await deps.store.completeOp(op._id);
       done++;
     } catch (err) {
-      const drop = op.attempts + 1 >= 8;
+      const waiting = err instanceof PendingTargetError;
+      const drop = !waiting && op.attempts + 1 >= 8;
       const delay = Math.min(5000 * Math.pow(2, op.attempts), 30 * 60 * 1000);
       await deps.store.failOp(
         op._id,
         err instanceof Error ? err.message.slice(0, 200) : "operation failed",
         deps.now() + delay,
         drop,
+        waiting,
       );
     }
   }
@@ -996,12 +998,12 @@ async function executeOp(
   if (op.kind === "flags") {
     const updates: {
       folderPath: string;
-      uid: number;
+      uid?: number;
       add: string[];
       remove: string[];
       messageId?: string;
     }[] = op.payload.updates ?? [];
-    const resolved = await resolveOpTargets(store, updates);
+    const resolved = await resolveOpTargets(deps, updates);
     const groups = new Map<
       string,
       { path: string; uids: number[]; add: string[]; remove: string[] }
@@ -1010,7 +1012,7 @@ async function executeOp(
       const r = resolved[i];
       const u = updates[i];
       if (!r) continue;
-      const path = sourcePathFor(u.folderPath, r.uid);
+      const path = r.authoritativePath ? r.path : sourcePathFor(u.folderPath, r.uid);
       if (!path) continue;
       const key =
         path + "|" + JSON.stringify(u.add) + "|" + JSON.stringify(u.remove);
@@ -1032,12 +1034,12 @@ async function executeOp(
   if (op.kind === "move") {
     const moves: {
       folderPath: string;
-      uid: number;
+      uid?: number;
       targetRole: FolderRole;
       targetPath?: string;
       messageId?: string;
     }[] = op.payload.moves ?? [];
-    const resolved = await resolveOpTargets(store, moves);
+    const resolved = await resolveOpTargets(deps, moves);
     for (let i = 0; i < moves.length; i++) {
       const mv = moves[i];
       const r = resolved[i];
@@ -1053,7 +1055,7 @@ async function executeOp(
         await store.upsertFolder({ path: targetPath, role: mv.targetRole });
         state = await store.getAccountState();
       }
-      const sourcePath = sourcePathFor(mv.folderPath, r.uid);
+      const sourcePath = r.authoritativePath ? r.path : sourcePathFor(mv.folderPath, r.uid);
       if (
         sourcePath === undefined ||
         sourcePath === targetPath ||
@@ -1070,7 +1072,7 @@ async function executeOp(
             undefined,
             r,
             targetPath,
-            undefined,
+            sourcePath === targetPath ? r.uid : undefined,
           );
           for (const f of state?.folders ?? []) {
             syncedByPath.set(f.path, new Set([...iter(parseUidSet(f.syncedUids))]));
@@ -1104,16 +1106,16 @@ async function executeOp(
   }
 
   if (op.kind === "expunge") {
-    const expunges: { folderPath: string; uid: number; messageId?: string }[] =
+    const expunges: OpItem[] =
       op.payload.expunges ?? [];
     // Permanent deletion has already removed the local message document.
     // Its queued folder/UID remain the durable remote deletion target.
-    const resolved = await resolveOpTargets(store, expunges, true);
+    const resolved = await resolveOpTargets(deps, expunges, true);
     const byPath = new Map<string, number[]>();
     for (let i = 0; i < expunges.length; i++) {
       const r = resolved[i];
       if (!r) continue;
-      const path = sourcePathFor(expunges[i].folderPath, r.uid);
+      const path = r.authoritativePath ? r.path : sourcePathFor(expunges[i].folderPath, r.uid);
       if (!path) continue;
       const list = byPath.get(path) ?? [];
       list.push(r.uid);
@@ -1160,11 +1162,15 @@ function defaultPathForRole(role: FolderRole): string {
 
 interface OpItem {
   folderPath: string;
-  uid: number;
+  uid?: number;
+  messageIdHeader?: string;
   messageId?: string;
 }
 
+class PendingTargetError extends Error {}
+
 interface ResolvedTarget {
+  authoritativePath?: boolean;
   path: string;
   uid: number;
   folderRole: string;
@@ -1173,25 +1179,57 @@ interface ResolvedTarget {
 // Ops store the message doc id when available so a message that moved since
 // the op was queued is applied at its current location.
 async function resolveOpTargets(
-  store: StorePort,
+  deps: EngineDeps,
   items: OpItem[],
   allowDeleted = false,
 ): Promise<(ResolvedTarget | null)[]> {
-  const ids = items
-    .map((i) => i.messageId)
-    .filter((x): x is string => !!x);
-  const refs = ids.length > 0 ? await store.opMessageRefs(ids) : {};
-  return items.map((item) => {
-    if (item.messageId) {
-      const r = refs[item.messageId];
-      if (!r) return allowDeleted
-        ? { path: item.folderPath, uid: item.uid, folderRole: "" }
-        : null;
-      if (r.uid === undefined || !r.folderPath) return null;
-      return { path: r.folderPath, uid: r.uid, folderRole: r.folderRole };
+  const ids = items.map(i => i.messageId).filter((x): x is string => !!x);
+  const refs = ids.length ? await deps.store.opMessageRefs(ids) : {};
+  const resolved: (ResolvedTarget | null)[] = [];
+  for (const item of items) {
+    const ref = item.messageId ? refs[item.messageId] : null;
+    if (item.messageId && !ref && !allowDeleted) { resolved.push(null); continue; }
+    const path = ref?.pendingFolderPath ?? ref?.folderPath ?? item.folderPath;
+    const uid = ref ? ref.uid : item.uid;
+    if (uid !== undefined && path && !(allowDeleted && !ref && item.messageIdHeader)) {
+      resolved.push({ path, uid, folderRole: ref?.folderRole ?? "", authoritativePath: !!ref?.pendingFolderPath });
+      continue;
     }
-    return { path: item.folderPath, uid: item.uid, folderRole: "" };
-  });
+    // A move without COPYUID has a durable destination but no UID. The ops
+    // worker can reconcile it itself, even after permanent local deletion.
+    const messageIdHeader = ref?.messageIdHeader ?? item.messageIdHeader;
+    if (!path || !messageIdHeader) throw new PendingTargetError("Waiting for remote message coordinates");
+    const candidates = [path];
+    if (allowDeleted && !ref && item.uid !== undefined) {
+      // Local deletion can race an in-flight move. Verify the Message-ID at
+      // the destination first, then its tracked inbound source; never Sent.
+      const state = await deps.store.getAccountState();
+      for (const folder of state?.folders ?? []) {
+        if (folder.path !== path && ["inbox", "junk", "archive", "trash"].includes(folder.role) &&
+            [...iter(parseUidSet(folder.syncedUids))].includes(item.uid)) candidates.push(folder.path);
+      }
+    }
+    let found: ResolvedTarget | undefined;
+    for (const candidate of candidates) {
+      const uids: number[] = deps.imap.searchHeader
+        ? await deps.imap.searchHeader(candidate, "Message-ID", messageIdHeader)
+        : await deps.imap.searchUids(candidate);
+      const matches: number[] = [];
+      for (let i = 0; i < uids.length; i += INGEST_BATCH) {
+        for await (const meta of deps.imap.fetchMeta(candidate, uids.slice(i, i + INGEST_BATCH))) {
+          if (meta.messageIdHeader === messageIdHeader) matches.push(meta.uid);
+        }
+      }
+      if (matches.length > 1) throw new PendingTargetError("Waiting for an unambiguous destination UID");
+      if (matches.length === 1) {
+        found = { path: candidate, uid: matches[0], folderRole: ref?.folderRole ?? "", authoritativePath: true };
+        break;
+      }
+    }
+    if (!found) throw new PendingTargetError("Waiting for destination UID");
+    resolved.push(found);
+  }
+  return resolved;
 }
 
 // Applies a COPYUID/MOVE result in one mutation: the message doc moves to

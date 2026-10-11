@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { sendCompletionV } from "./validators";
 
 const address = v.object({
   name: v.optional(v.string()),
@@ -167,6 +168,8 @@ export default defineSchema({
     flagged: v.boolean(),
     answered: v.boolean(),
     isOutbound: v.boolean(),
+    deliveryRecipientsRecorded: v.optional(v.boolean()),
+    pendingRemoteFolderId: v.optional(v.id("folders")),
     hasAttachments: v.boolean(),
     attachments: v.array(
       v.object({
@@ -332,6 +335,7 @@ export default defineSchema({
     contentHash: v.string(),
     draftId: v.optional(v.id("drafts")),
     uncertainSince: v.optional(v.number()),
+    recovery: v.optional(sendCompletionV),
     attemptFinishedAt: v.optional(v.number()),
     smtpAcceptedAt: v.optional(v.number()),
     resolution: v.optional(v.union(v.literal("delivered"), v.literal("notDelivered"))),

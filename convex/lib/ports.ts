@@ -80,6 +80,7 @@ export interface ImapPort {
     canMove: boolean,
   ): Promise<Map<number, number>>;
   expunge(path: string, uids: number[], useUidPlus: boolean): Promise<void>;
+  searchHeader?(path: string, header: string, value: string): Promise<number[]>;
   append(
     path: string,
     source: Uint8Array | string,
@@ -239,7 +240,7 @@ export interface IngestMessageArg {
 
 export interface FlagOpItem {
   folderPath: string;
-  uid: number;
+  uid?: number;
   add: string[];
   remove: string[];
   messageId?: string;
@@ -247,7 +248,7 @@ export interface FlagOpItem {
 
 export interface MoveOpItem {
   folderPath: string;
-  uid: number;
+  uid?: number;
   targetRole: FolderRole;
   targetPath?: string;
   messageId?: string;
@@ -255,7 +256,8 @@ export interface MoveOpItem {
 
 export interface ExpungeOpItem {
   folderPath: string;
-  uid: number;
+  uid?: number;
+  messageIdHeader?: string;
   messageId?: string;
 }
 
@@ -336,11 +338,13 @@ export interface StorePort {
         folderPath: string | null;
         uid?: number;
         folderRole: string;
+        pendingFolderPath?: string;
+        messageIdHeader?: string;
       } | null
     >
   >;
   completeOp(opId: string): Promise<void>;
-  failOp(opId: string, error: string, nextAttemptAt: number, drop: boolean): Promise<void>;
+  failOp(opId: string, error: string, nextAttemptAt: number, drop: boolean, waiting?: boolean): Promise<void>;
   threadContexts(
     items: {
       messageIdHeader?: string;

@@ -180,6 +180,24 @@ export const performSend = internalAction({
     // Parse before SMTP so a parser failure is proven pre-delivery.
     const parsed = await new MailParserPort().parse(source);
 
+    // Store the complete private MIME before SMTP and reserve a recovery job
+    // atomically with the uncertain state. An action crash after acceptance
+    // must not lose partial-delivery finalization or the attachment bytes.
+    const sourceStorageId = await ctx.storage.store(
+      new Blob([new Uint8Array(sentSource)], { type: "message/rfc822" }),
+    );
+    const recovery = {
+      sendLogId: args.sendLogId, draftId: args.draftId,
+      replyToMessageDocId: args.replyToMessageDocId, accountId: args.accountId,
+      sourceStorageId, messageIdHeader: args.messageIdHeader, inReplyTo: args.inReplyTo,
+      references: args.references ?? [], subject: args.subject,
+      from: { name: account.displayName, email: account.email }, to, cc, bcc,
+      text: (args.text ?? "").slice(0, 240),
+      attachments: parsed.attachments.map(a => ({
+        id: a.id, filename: a.filename, contentType: a.contentType,
+        size: a.size, inline: a.inline, ...(a.cid ? { cid: a.cid } : {}),
+      })),
+    };
     const transport = smtpTransport({
       host: account.smtpHost,
       port: account.smtpPort,
@@ -192,6 +210,7 @@ export const performSend = internalAction({
       await ctx.runMutation(internal.send.markSendUncertain, {
         sendLogId: args.sendLogId,
         draftId: args.draftId,
+        recovery,
       });
       const result = await transport.sendMail({
         envelope: {
@@ -264,17 +283,6 @@ export const performSend = internalAction({
       }
     } catch {
       // Sent append failed; persist source and retry below.
-    }
-
-    let sourceStorageId: Id<"_storage"> | undefined;
-    if (sentUid === undefined && ctx.storage) {
-      try {
-        sourceStorageId = await ctx.storage.store(
-          new Blob([new Uint8Array(sentSource)], { type: "message/rfc822" }),
-        );
-      } catch (err) {
-        console.error("Failed to persist sent source for retry:", err);
-      }
     }
 
     const completion = {

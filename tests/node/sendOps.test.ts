@@ -26,6 +26,7 @@ test.each([
     runQuery: vi.fn(async ref => getFunctionName(ref) === "syncStore:getAccountDoc"
       ? { email: "me@x.com", displayName: "Me" } : {}),
     runMutation: h.mutation,
+    storage: { store: vi.fn().mockResolvedValue("recovery-source"), delete: vi.fn() },
   } as unknown as ActionCtx;
   const args: FunctionArgs<typeof internal.node.sendOps.performSend> = {
     accountId: "account" as Id<"accounts">, sendLogId: "log" as Id<"sendLog">, draftId: "draft" as Id<"drafts">,
@@ -33,7 +34,7 @@ test.each([
   };
   const handler = (performSend as unknown as { handler: (ctx: ActionCtx, input: FunctionArgs<typeof internal.node.sendOps.performSend>) => Promise<unknown> }).handler;
   await expect(handler(ctx, args)).rejects.toThrow();
-  expect(h.mutation).toHaveBeenCalledWith(internal.send.markSendUncertain, { sendLogId: args.sendLogId, draftId: args.draftId });
+  expect(h.mutation).toHaveBeenCalledWith(internal.send.markSendUncertain, expect.objectContaining({ sendLogId: args.sendLogId, draftId: args.draftId, recovery: expect.objectContaining({ sourceStorageId: "recovery-source" }) }));
   const calls = h.mutation.mock.calls.filter(([ref]) => getFunctionName(ref) === "send:failSend");
   expect(calls).toHaveLength(definite ? 1 : 0);
   if (definite) expect(calls[0][1]).toMatchObject({ definiteRejection: true, draftId: args.draftId });
@@ -50,6 +51,7 @@ test.each([false, true])("performSend finalizes partial acceptance with only acc
   const ctx = {
     runQuery: vi.fn(async ref => getFunctionName(ref) === "syncStore:getAccountDoc" ? { email: "me@x.com", displayName: "Me" } : {}),
     runMutation: h.mutation,
+    storage: { store: vi.fn().mockResolvedValue("recovery-source"), delete: vi.fn() },
   } as unknown as ActionCtx;
   const args: FunctionArgs<typeof internal.node.sendOps.performSend> = {
     accountId: "account" as Id<"accounts">, sendLogId: "log" as Id<"sendLog">,
@@ -134,6 +136,7 @@ test("performSend retains Bcc headers in IMAP append while stripping them from S
   const ctx = {
     runQuery: vi.fn(async ref => getFunctionName(ref) === "syncStore:getAccountDoc" ? { email: "me@x.com", displayName: "Me" } : {}),
     runMutation: h.mutation,
+    storage: { store: vi.fn().mockResolvedValue("recovery-source"), delete: vi.fn() },
   } as unknown as ActionCtx;
 
   const args: FunctionArgs<typeof internal.node.sendOps.performSend> = {

@@ -144,8 +144,8 @@ export const setRead = mutation({
       if (m.seen === args.read) continue;
       await ctx.db.patch(m._id, { seen: args.read });
       touched.add(m.threadId);
-      const path = await folderPath(ctx, paths, m.folderId);
-      if (m.uid !== undefined && path) {
+      const path = await folderPath(ctx, paths, m.pendingRemoteFolderId ?? m.folderId);
+      if (path && (m.uid !== undefined || m.pendingRemoteFolderId)) {
         const list = ops.get(m.accountId) ?? [];
         list.push({
           folderPath: path,
@@ -186,8 +186,8 @@ export const setStarred = mutation({
       if (m.flagged === args.starred) continue;
       await ctx.db.patch(m._id, { flagged: args.starred });
       touched.add(m.threadId);
-      const path = await folderPath(ctx, paths, m.folderId);
-      if (m.uid !== undefined && path) {
+      const path = await folderPath(ctx, paths, m.pendingRemoteFolderId ?? m.folderId);
+      if (path && (m.uid !== undefined || m.pendingRemoteFolderId)) {
         const list = ops.get(m.accountId) ?? [];
         list.push({
           folderPath: path,
@@ -227,14 +227,14 @@ async function moveToFolderRole(
       target = await folderForRole(ctx, m.accountId, targetRole);
       folderCache.set(`${m.accountId}:${targetRole}`, target);
     }
-    const sourcePath = await folderPath(ctx, paths, m.folderId);
+    const sourcePath = await folderPath(ctx, paths, m.pendingRemoteFolderId ?? m.folderId);
     const patch: Record<string, unknown> = { folderRole: targetRole };
     // When the target folder row does not exist yet the role still changes;
     // the pending op creates the folder remotely later.
     if (target) patch.folderId = target._id;
     await ctx.db.patch(m._id, patch);
     touched.add(m.threadId);
-    if (m.uid !== undefined && sourcePath) {
+    if (sourcePath && (m.uid !== undefined || m.pendingRemoteFolderId)) {
       const list = ops.get(m.accountId) ?? [];
       list.push({
         folderPath: sourcePath,
@@ -348,8 +348,8 @@ export const moveToInbox = mutation({
           }
           patch.folderRole = "inbox";
           if (inboxFolder) patch.folderId = inboxFolder._id;
-          const sourcePath = await folderPath(ctx, paths, m.folderId);
-          if (m.uid !== undefined && sourcePath) {
+          const sourcePath = await folderPath(ctx, paths, m.pendingRemoteFolderId ?? m.folderId);
+          if (sourcePath && (m.uid !== undefined || m.pendingRemoteFolderId)) {
             const list = ops.get(m.accountId) ?? [];
             list.push({
               folderPath: sourcePath,
@@ -482,10 +482,10 @@ export const deleteForever = mutation({
       let deletedCount = 0;
       for (const m of msgs) {
         if (m.folderRole !== "trash") continue;
-        const path = await folderPath(ctx, paths, m.folderId);
-        if (m.uid !== undefined && path) {
+        const path = await folderPath(ctx, paths, m.pendingRemoteFolderId ?? m.folderId);
+        if (path && (m.uid !== undefined || m.pendingRemoteFolderId)) {
           const list = ops.get(m.accountId) ?? [];
-          list.push({ folderPath: path, uid: m.uid, messageId: m._id });
+          list.push({ folderPath: path, uid: m.uid, messageId: m._id, messageIdHeader: m.messageIdHeader });
           ops.set(m.accountId, list);
         }
         await ctx.db.delete(m._id);

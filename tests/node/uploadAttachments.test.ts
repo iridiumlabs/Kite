@@ -7,7 +7,7 @@ test("large MCP inline attachments are HTTP-uploaded before Convex actions", asy
   vi.stubGlobal("fetch", fetch);
   const bytes = Buffer.alloc(4 * 1024 * 1024, 5);
   const refs = await uploadSendAttachments([{ filename: "large.bin", contentType: "application/octet-stream", contentBase64: bytes.toString("base64") }, { messageId: "m", attachmentId: "a" }], "secret", "https://test.convex.cloud");
-  expect(refs).toEqual([{ storageId: "stored", filename: "large.bin", contentType: "application/octet-stream" }, { messageId: "m", attachmentId: "a" }]);
+  expect(refs).toEqual([{ storageId: "stored", filename: "large.bin", contentType: "application/octet-stream", size: bytes.length }, { messageId: "m", attachmentId: "a" }]);
   const [url, options] = fetch.mock.calls[0];
   expect(String(url)).toBe("https://test.convex.site/send-attachment");
   expect(options.headers.authorization).toBe("Bearer secret");

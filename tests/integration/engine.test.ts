@@ -1078,6 +1078,92 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     expect((await folderByRole(t, accountId, "archive")).syncedUids).toBe("1-2");
   });
 
+  test("standalone ops retain read/star and chained restores after an unmapped move", async () => {
+    const { t, imap, deps, now } = await world();
+    imap.mailbox("INBOX").append(mailSource({ id: "pending-actions@t" }));
+    imap.mailbox("Archive").append(mailSource({ id: "untouched@t" }));
+    await runAccountSync(deps);
+    const message = (await allMessages(t)).find(m => m.messageIdHeader === "pending-actions@t")!;
+    const move = imap.moveOrCopy.bind(imap);
+    imap.moveOrCopy = async (...args) => { await move(...args); return new Map(); };
+    const user = t.withIdentity({ subject: USER });
+    await user.mutation(api.mail.archive, { threadIds: [message.threadId] });
+    now.t = Date.now(); await runPendingOps(deps);
+    await user.mutation(api.mail.setRead, { messageIds: [message._id], read: true });
+    await user.mutation(api.mail.setStarred, { messageIds: [message._id], starred: true });
+    now.t = Date.now();
+    expect(await runPendingOps(deps)).toBe(2);
+    expect(imap.mailbox("Archive").messages.get(2)!.flags).toEqual(new Set(["seen", "flagged"]));
+    expect(imap.mailbox("Archive").messages.get(1)!.flags.size).toBe(0);
+    await user.mutation(api.mail.restore, { threadIds: [message.threadId] });
+    now.t = Date.now(); await runPendingOps(deps);
+    expect(imap.mailbox("Archive").messages.size).toBe(1);
+    expect(imap.mailbox("INBOX").messages.size).toBe(1);
+    await user.mutation(api.mail.setStarred, { messageIds: [message._id], starred: false });
+    now.t = Date.now(); await runPendingOps(deps);
+    expect([...imap.mailbox("INBOX").messages.values()][0].flags).toEqual(new Set(["seen"]));
+  });
+
+  test("permanent deletion after an unmapped trash move survives local record removal", async () => {
+    const { t, imap, deps, now } = await world();
+    imap.mailbox("INBOX").append(mailSource({ id: "delete-pending@t" }));
+    imap.mailbox("Trash").append(mailSource({ id: "unrelated-trash@t" }));
+    await runAccountSync(deps);
+    const message = (await allMessages(t)).find(m => m.messageIdHeader === "delete-pending@t")!;
+    const move = imap.moveOrCopy.bind(imap);
+    imap.moveOrCopy = async (...args) => { await move(...args); return new Map(); };
+    const user = t.withIdentity({ subject: USER });
+    await user.mutation(api.mail.trash, { threadIds: [message.threadId] });
+    now.t = Date.now(); await runPendingOps(deps);
+    await user.mutation(api.mail.deleteForever, { threadIds: [message.threadId] });
+    expect(await t.run(ctx => ctx.db.get(message._id))).toBeNull();
+    now.t = Date.now(); await runPendingOps(deps);
+    expect([...imap.mailbox("Trash").messages.keys()]).toEqual([1]);
+    await runAccountSync(deps);
+    expect((await allMessages(t)).some(m => m.messageIdHeader === "delete-pending@t")).toBe(false);
+  });
+
+  test.each([true, false])("permanent deletion during an in-flight move uses identity, not the old UID (COPYUID=%s)", async mapsUid => {
+    const { t, imap, deps, now } = await world();
+    imap.mailbox("INBOX").append(mailSource({ id: "racing-delete@t" }));
+    imap.mailbox("Trash").append(mailSource({ id: "untouched-trash@t" }));
+    await runAccountSync(deps);
+    const message = (await allMessages(t)).find(m => m.messageIdHeader === "racing-delete@t")!;
+    const user = t.withIdentity({ subject: USER });
+    const move = imap.moveOrCopy.bind(imap);
+    imap.moveOrCopy = async (...args) => {
+      const result = await move(...args);
+      await user.mutation(api.mail.deleteForever, { threadIds: [message.threadId] });
+      return mapsUid ? result : new Map();
+    };
+    await user.mutation(api.mail.trash, { threadIds: [message.threadId] });
+    now.t = Date.now(); await runPendingOps(deps);
+    now.t = Date.now(); await runPendingOps(deps);
+    expect([...imap.mailbox("Trash").messages.keys()]).toEqual([1]);
+  });
+
+  test("missing destination scans defer operations without consuming their retry budget", async () => {
+    const { t, imap, deps, now } = await world();
+    imap.mailbox("INBOX").append(mailSource({ id: "wait-for-uid@t" }));
+    await runAccountSync(deps);
+    const message = (await allMessages(t))[0];
+    const move = imap.moveOrCopy.bind(imap);
+    imap.moveOrCopy = async (...args) => { await move(...args); return new Map(); };
+    const user = t.withIdentity({ subject: USER });
+    await user.mutation(api.mail.archive, { threadIds: [message.threadId] });
+    now.t = Date.now(); await runPendingOps(deps);
+    await user.mutation(api.mail.setRead, { messageIds: [message._id], read: true });
+    const search = vi.spyOn(imap, "searchUids").mockResolvedValue([]);
+    for (let i = 0; i < 10; i++) {
+      now.t = Date.now() + (i + 1) * 60000;
+      expect(await runPendingOps(deps)).toBe(0);
+    }
+    expect(await t.run(ctx => ctx.db.query("pendingOps").collect())).toMatchObject([{ attempts: 0 }]);
+    search.mockRestore();
+    now.t += 60000; expect(await runPendingOps(deps)).toBe(1);
+    expect(imap.mailbox("Archive").messages.get(1)!.flags.has("seen")).toBe(true);
+  });
+
   test("a sync reconciles moves without COPYUID in the same run", async () => {
     const { t, imap, deps, now } = await world();
     imap.mailbox("INBOX").append(mailSource({ id: "same-run@t" }));

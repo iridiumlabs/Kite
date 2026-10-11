@@ -146,9 +146,10 @@ export async function ingestMessage(
         uid: input.uid,
         inReplyTo: input.inReplyTo,
         references: (input.references ?? []).slice(-30),
-        to: input.to,
-        cc: input.cc,
-        bcc: input.bcc,
+        // SMTP acceptance is authoritative; raw MIME may include rejected recipients.
+        to: localPlaceholder.deliveryRecipientsRecorded ? localPlaceholder.to : input.to,
+        cc: localPlaceholder.deliveryRecipientsRecorded ? localPlaceholder.cc : input.cc,
+        bcc: localPlaceholder.deliveryRecipientsRecorded ? localPlaceholder.bcc : input.bcc,
         replyTo: input.replyTo,
         seen: input.seen,
         flagged: input.flagged,

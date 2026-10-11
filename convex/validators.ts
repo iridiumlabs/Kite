@@ -5,6 +5,38 @@ export const addressV = v.object({
   email: v.string(),
 });
 
+// Shared by the live finalizer and the durable, SMTP-free recovery path.
+export const sendCompletionArgs = {
+  sendLogId: v.id("sendLog"),
+  accountId: v.id("accounts"),
+  draftId: v.optional(v.id("drafts")),
+  replyToMessageDocId: v.optional(v.id("messages")),
+  sentFolderId: v.optional(v.id("folders")),
+  sentUid: v.optional(v.number()),
+  messageIdHeader: v.string(),
+  inReplyTo: v.optional(v.string()),
+  references: v.array(v.string()),
+  subject: v.string(),
+  from: addressV,
+  to: v.array(addressV),
+  cc: v.array(addressV),
+  bcc: v.array(addressV),
+  rejectedRecipients: v.optional(v.array(v.string())),
+  text: v.string(),
+  attachments: v.array(
+    v.object({
+      id: v.string(),
+      filename: v.string(),
+      contentType: v.string(),
+      size: v.number(),
+      cid: v.optional(v.string()),
+      inline: v.boolean(),
+    }),
+  ),
+  sourceStorageId: v.optional(v.id("_storage")),
+};
+export const sendCompletionV = v.object(sendCompletionArgs);
+
 export const apiKeyArg = { apiKey: v.optional(v.string()) };
 
 export const inboxBucketV = v.union(

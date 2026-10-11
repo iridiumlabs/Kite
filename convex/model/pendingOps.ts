@@ -6,21 +6,22 @@ import { Id } from "../_generated/dataModel";
 // (phase 2) interprets these against IMAP.
 export type FlagOp = {
   folderPath: string;
-  uid: number;
+  uid?: number;
   add: string[];
   remove: string[];
   messageId?: Id<"messages">;
 };
 export type MoveOp = {
   folderPath: string;
-  uid: number;
+  uid?: number;
   targetRole: string;
   targetPath?: string;
   messageId?: Id<"messages">;
 };
 export type ExpungeOp = {
   folderPath: string;
-  uid: number;
+  uid?: number;
+  messageIdHeader?: string;
   messageId?: Id<"messages">;
 };
 export type PendingOpPayloads = {

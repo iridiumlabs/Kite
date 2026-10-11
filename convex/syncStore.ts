@@ -155,7 +155,7 @@ export const opMessageRefs = internalQuery({
   handler: async (ctx, args) => {
     const out: Record<
       string,
-      { folderId: Id<"folders"> | null; folderPath: string | null; uid?: number } | null
+      { folderId: Id<"folders"> | null; folderPath: string | null; uid?: number; folderRole: string; messageIdHeader: string; pendingFolderPath?: string } | null
     > = {};
     for (const id of args.ids) {
       const m = await ctx.db.get(id);
@@ -169,7 +169,9 @@ export const opMessageRefs = internalQuery({
         folderPath: folder?.path ?? null,
         uid: m.uid,
         folderRole: m.folderRole,
-      } as never;
+        messageIdHeader: m.messageIdHeader,
+        pendingFolderPath: m.pendingRemoteFolderId ? (await ctx.db.get(m.pendingRemoteFolderId))?.path : undefined,
+      };
     }
     return out;
   },
@@ -626,6 +628,7 @@ export const relocateMessages = internalMutation({
         folderId: mv.folderId,
         folderRole: mv.folderRole,
         uid: mv.uid,
+        pendingRemoteFolderId: undefined,
       });
       touched.add(m.threadId);
     }
@@ -776,6 +779,8 @@ export const applyMoveResults = internalMutation({
         folderId: mv.folderId,
         folderRole: mv.folderRole,
         uid: mv.uid,
+        // Keep the last confirmed remote folder independent of optimistic UI moves.
+        pendingRemoteFolderId: mv.folderId,
       });
       touched.add(m.threadId);
     }
@@ -978,6 +983,7 @@ export const failOp = internalMutation({
     error: v.string(),
     nextAttemptAt: v.number(),
     drop: v.boolean(),
+    waiting: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const op = await ctx.db.get(args.opId);
@@ -990,7 +996,7 @@ export const failOp = internalMutation({
       return;
     }
     await ctx.db.patch(args.opId, {
-      attempts: op.attempts + 1,
+      attempts: args.waiting ? op.attempts : op.attempts + 1,
       lastError: args.error,
       nextAttemptAt: args.nextAttemptAt,
     });

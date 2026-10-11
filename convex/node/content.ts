@@ -144,18 +144,16 @@ export const getMessageContent = internalAction({
       );
     }
     const { accountId } = resolved;
-    let src: Uint8Array;
-    let close: (() => Promise<void>) | undefined;
-    if ("storageId" in resolved) {
-      const blob = await ctx.storage.get(resolved.storageId);
-      if (!blob) throw new Error("Message source not found");
-      src = new Uint8Array(await blob.arrayBuffer());
-    } else {
-      const { port, folderPath, uid } = resolved;
-      close = resolved.close;
-      src = await port.fetchSource(folderPath, uid);
-    }
+    const close = "close" in resolved ? resolved.close : undefined;
     try {
+      let src: Uint8Array;
+      if ("storageId" in resolved) {
+        const blob = await ctx.storage.get(resolved.storageId);
+        if (!blob) throw new Error("Message source not found");
+        src = new Uint8Array(await blob.arrayBuffer());
+      } else {
+        src = await resolved.port.fetchSource(resolved.folderPath, resolved.uid);
+      }
       const parsed = await parser.parse(src);
       const ref = await ctx.runQuery(internal.syncStore.messageRemoteRef, {
         messageId: args.messageId,
@@ -164,6 +162,11 @@ export const getMessageContent = internalAction({
         internal.syncStore.settingsForUser,
         { userId: ref!.message.userId },
       );
+      if (ref!.message.deliveryRecipientsRecorded) {
+        parsed.to = ref!.message.to;
+        parsed.cc = ref!.message.cc;
+        parsed.bcc = ref!.message.bcc;
+      }
       const loadRemote: boolean = args.loadRemoteImages ?? settings?.loadRemoteImages ?? false;
 
       const cidMap = new Map<string, string>();
@@ -257,18 +260,16 @@ export const fetchAttachmentData = internalAction({
         "This message moved. Refreshing the mailbox, try again in a moment.",
       );
     }
-    let src: Uint8Array;
-    let close: (() => Promise<void>) | undefined;
-    if ("storageId" in resolved) {
-      const blob = await ctx.storage.get(resolved.storageId);
-      if (!blob) throw new Error("Message source not found");
-      src = new Uint8Array(await blob.arrayBuffer());
-    } else {
-      const { port, folderPath, uid } = resolved;
-      close = resolved.close;
-      src = await port.fetchSource(folderPath, uid);
-    }
+    const close = "close" in resolved ? resolved.close : undefined;
     try {
+      let src: Uint8Array;
+      if ("storageId" in resolved) {
+        const blob = await ctx.storage.get(resolved.storageId);
+        if (!blob) throw new Error("Message source not found");
+        src = new Uint8Array(await blob.arrayBuffer());
+      } else {
+        src = await resolved.port.fetchSource(resolved.folderPath, resolved.uid);
+      }
       const parsed = await parser.parse(src);
       const att = parsed.attachments.find(
         (a) => a.id === args.attachmentId || a.cid === args.attachmentId,
@@ -291,18 +292,16 @@ export const downloadAttachment = internalAction({
         "This message moved. Refreshing the mailbox, try again in a moment.",
       );
     }
-    let src: Uint8Array;
-    let close: (() => Promise<void>) | undefined;
-    if ("storageId" in resolved) {
-      const blob = await ctx.storage.get(resolved.storageId);
-      if (!blob) throw new Error("Message source not found");
-      src = new Uint8Array(await blob.arrayBuffer());
-    } else {
-      const { port, folderPath, uid } = resolved;
-      close = resolved.close;
-      src = await port.fetchSource(folderPath, uid);
-    }
+    const close = "close" in resolved ? resolved.close : undefined;
     try {
+      let src: Uint8Array;
+      if ("storageId" in resolved) {
+        const blob = await ctx.storage.get(resolved.storageId);
+        if (!blob) throw new Error("Message source not found");
+        src = new Uint8Array(await blob.arrayBuffer());
+      } else {
+        src = await resolved.port.fetchSource(resolved.folderPath, resolved.uid);
+      }
       const parsed = await parser.parse(src);
       const att = parsed.attachments.find(
         (a) => a.id === args.attachmentId || a.cid === args.attachmentId,
