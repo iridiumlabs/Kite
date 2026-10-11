@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
+import { HomeGate } from "@/components/HomeGate";
+
 export default function Home() {
-  return (
-    <main className="flex min-h-screen items-center justify-center">
-      <h1 className="text-2xl font-semibold">Post</h1>
-    </main>
-  );
+  if (process.env.NEXT_PUBLIC_POST_DEV_AUTH === "1") {
+    redirect("/mail/primary");
+  }
+  return <HomeGate />;
 }

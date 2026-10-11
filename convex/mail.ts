@@ -1034,3 +1034,59 @@ export const deepSearch = action({
     return docs.filter((d) => d.userId === userId);
   },
 });
+
+// Recipient autocomplete for compose. Bounded scan of recent mail across
+// inbox and sent roles; collects distinct addresses matching the prefix on
+// name or email, most recent first.
+export const suggestRecipients = query({
+  args: {
+    ...apiKeyArg,
+    prefix: v.string(),
+    accountId: v.optional(v.id("accounts")),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const prefix = args.prefix.trim().toLowerCase();
+    const limit = Math.min(args.limit ?? 8, 20);
+    if (prefix.length === 0) return [];
+    const results = new Map<string, { name?: string; email: string }>();
+    const roles: MessageFolderRole[] = ["inbox", "sent", "archive"];
+    for (const role of roles) {
+      if (results.size >= limit) break;
+      const scan = ctx.db
+        .query("messages")
+        .withIndex(
+          args.accountId ? "by_account_role_date" : "by_user_role_date",
+          (q) => {
+            const base = args.accountId
+              ? q.eq("accountId", args.accountId)
+              : q.eq("userId", userId);
+            return base.eq("folderRole", role);
+          },
+        )
+        .order("desc");
+      const docs = await scan.take(150);
+      for (const m of docs) {
+        const candidates = [
+          m.from,
+          ...m.to,
+          ...m.cc,
+        ];
+        for (const c of candidates) {
+          if (results.size >= limit) break;
+          const email = c.email.toLowerCase();
+          const name = c.name?.toLowerCase();
+          if (!email.includes(prefix) && !(name && name.includes(prefix))) {
+            continue;
+          }
+          if (!results.has(email)) {
+            results.set(email, { name: c.name, email: c.email });
+          }
+        }
+        if (results.size >= limit) break;
+      }
+    }
+    return [...results.values()];
+  },
+});
