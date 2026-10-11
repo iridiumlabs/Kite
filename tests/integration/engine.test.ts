@@ -12,7 +12,7 @@ import {
   parseAddressList,
   parseMessageIdList,
 } from "../../convex/lib/addresses";
-import { runAccountSync, type EngineDeps } from "../../convex/lib/syncEngine";
+import { runAccountSync, runPendingOps, type EngineDeps } from "../../convex/lib/syncEngine";
 import { makeStorePort } from "../../convex/node/store";
 import type { SyncCapabilities } from "../../convex/lib/syncPlan";
 import type {
@@ -980,5 +980,66 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     expect(msgs[0].folderId).toBe(sentFolder._id);
     expect(msgs[0].uid).toBe(uid);
     expect(msgs[0].folderRole).toBe("sent");
+  });
+
+  test("flag refreshes never mark unloaded older mail as synced", async () => {
+    const { t, accountId, imap, deps, now } = await world();
+    for (let i = 0; i < 1000; i++) imap.mailbox("INBOX").append(mailSource({ id: `backfill-${i}@t` }));
+    await runAccountSync(deps);
+    const before = await folderByRole(t, accountId, "inbox");
+    expect((await allMessages(t)).length).toBe(300);
+    expect(before.oldestUid).toBe(701);
+    expect(before.backfillDone).toBe(false);
+    now.t += 11 * 60 * 1000;
+    await runAccountSync(deps);
+    const after = await folderByRole(t, accountId, "inbox");
+    expect(after.syncedUids).toBe(before.syncedUids);
+    expect(after.oldestUid).toBe(701);
+    expect(after.backfillDone).toBe(false);
+    expect((await allMessages(t)).length).toBe(300);
+  });
+
+  test("a permanent deletion expunges remote mail after local records disappear", async () => {
+    const { t, imap, deps, now } = await world();
+    imap.mailbox("Trash").append(mailSource({ id: "delete-forever@t" }));
+    await runAccountSync(deps);
+    const message = (await allMessages(t))[0];
+    await t.withIdentity({ subject: USER }).mutation(api.mail.deleteForever, { threadIds: [message.threadId] });
+    expect(await allMessages(t)).toHaveLength(0);
+    now.t = Date.now(); // pending operations are enqueued with wall-clock time
+    await runAccountSync(deps);
+    expect(imap.mailbox("Trash").messages.size).toBe(0);
+    expect(await allMessages(t)).toHaveLength(0);
+  });
+
+  test("batched moves preserve every source removal and target COPYUID", async () => {
+    const { t, accountId, imap, deps, now } = await world();
+    for (let i = 0; i < 3; i++) imap.mailbox("INBOX").append(mailSource({ id: `batch-${i}@t` }));
+    await runAccountSync(deps);
+    const messages = await allMessages(t);
+    await t.withIdentity({ subject: USER }).mutation(api.mail.archive, { threadIds: messages.map(m => m.threadId) });
+    now.t = Date.now();
+    // Assert immediately after the batch, before a full sync can repair it.
+    expect(await runPendingOps(deps, imap.caps)).toBe(1);
+    expect(imap.mailbox("INBOX").messages.size).toBe(0);
+    expect(imap.mailbox("Archive").messages.size).toBe(3);
+    expect((await folderByRole(t, accountId, "inbox")).syncedUids).toBe("");
+    expect((await folderByRole(t, accountId, "archive")).syncedUids).toBe("1-3");
+    expect((await allMessages(t)).map(m => m.folderRole)).toEqual(["archive", "archive", "archive"]);
+  });
+
+  test("foreign-client remote drafts are imported only once", async () => {
+    const { t, imap, deps, now } = await world();
+    imap.mailbox("Drafts").append(mailSource({ id: "foreign-draft@t", from: OWNER_EMAIL }));
+    await runAccountSync(deps);
+    await runAccountSync(deps); // draft linking uses the persisted folder window
+    const before = await t.run(ctx => ctx.db.query("drafts").collect());
+    expect(before).toHaveLength(1);
+    now.t += 11 * 60 * 1000;
+    await runAccountSync(deps);
+    const after = await t.run(ctx => ctx.db.query("drafts").collect());
+    expect(after).toHaveLength(1);
+    expect(after[0]._id).toBe(before[0]._id);
+    expect((await t.withIdentity({ subject: USER }).query(api.mail.counts, {})).drafts).toBe(1);
   });
 });

@@ -38,9 +38,20 @@ export function blockRemoteImages(html: string): {
   blocked: number;
 } {
   let blocked = 0;
-  const out = html.replace(
-    /<img\b([^>]*?)\bsrc\s*=\s*(["'])(https?:\/\/[^"']+)\2([^>]*)>/gi,
+  // Strip resource-bearing styles as well as img sources. This also covers
+  // CSS-escaped function names; safe typography and spacing remain untouched.
+  const withoutCssImages = html.replace(
+    /\bstyle\s*=\s*(["'])([\s\S]*?)\1/gi,
+    (whole, _quote: string, style: string) => {
+      if (!/url\s*\(|\\/i.test(style)) return whole;
+      blocked++;
+      return "";
+    },
+  );
+  const out = withoutCssImages.replace(
+    /<img\b([^>]*?)\bsrc\s*=\s*(["'])([^"']+)\2([^>]*)>/gi,
     (whole, pre: string, quote: string, url: string, post: string) => {
+      if (/^(?:data:|cid:)/i.test(url.trim())) return whole;
       blocked++;
       return `<img${pre}data-src=${quote}${url}${quote} src=""${post}>`;
     },

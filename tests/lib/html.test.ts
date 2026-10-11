@@ -57,6 +57,20 @@ describe("rewriteCidReferences", () => {
 });
 
 describe("blockRemoteImages", () => {
+  test("blocks CSS image URLs and escaped functions while keeping ordinary styles", () => {
+    const result = blockRemoteImages('<div style="background-image:url(https://tracker/open.png);color:red">Mail</div><p style="color:blue">Safe</p>');
+    expect(result.blocked).toBe(1);
+    expect(result.html).not.toContain("tracker");
+    expect(result.html).toContain('style="color:blue"');
+    expect(blockRemoteImages('<div style="background:u\\\\72l(https://tracker/open)">Mail</div>').blocked).toBe(1);
+  });
+
+  test("blocks protocol-relative and relative image URLs too", () => {
+    const result = blockRemoteImages('<img src="//tracker/open"><img src="/track">');
+    expect(result.blocked).toBe(2);
+    expect(result.html).toContain('src=""');
+  });
+
   test("moves http src to data-src and counts it", () => {
     const r = blockRemoteImages('<img src="https://t.com/p.gif" width="1">');
     expect(r.blocked).toBe(1);

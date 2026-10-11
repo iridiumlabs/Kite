@@ -148,6 +148,10 @@ export const performSend = internalAction({
       password,
     });
     try {
+      await ctx.runMutation(internal.send.markSendUncertain, {
+        sendLogId: args.sendLogId,
+        draftId: args.draftId,
+      });
       await transport.sendMail({
         envelope: {
           from: account.email,
@@ -155,6 +159,19 @@ export const performSend = internalAction({
         },
         raw: source,
       });
+    } catch (error) {
+      // An explicit SMTP 4xx/5xx response is a rejection, not an ambiguous
+      // disconnect after DATA. Transport/timeouts remain reserved as uncertain.
+      const code = (error as { responseCode?: number } | null)?.responseCode;
+      if (typeof code === "number" && code >= 400 && code < 600) {
+        await ctx.runMutation(internal.send.failSend, {
+          sendLogId: args.sendLogId,
+          draftId: args.draftId,
+          error: error instanceof Error ? error.message : "SMTP rejected message",
+          definiteRejection: true,
+        });
+      }
+      throw error;
     } finally {
       transport.close();
     }
@@ -203,7 +220,7 @@ export const performSend = internalAction({
       // The message was sent; a Sent copy failure is reconciled by sync.
     }
 
-    const result = await ctx.runMutation(internal.send.completeSend, {
+    const completion = {
       sendLogId: args.sendLogId,
       draftId: args.draftId,
       replyToMessageDocId: args.replyToMessageDocId,
@@ -226,7 +243,14 @@ export const performSend = internalAction({
         size: a.content.length,
         inline: false,
       })),
-    });
-    return result;
+    };
+    try {
+      return await ctx.runMutation(internal.send.completeSend, completion);
+    } catch (error) {
+      // Retry local finalization only, never SMTP. completeSend is idempotent,
+      // so an accepted message cannot be delivered twice after a lost response.
+      await ctx.scheduler.runAfter(5000, internal.send.completeSend, completion);
+      throw error;
+    }
   },
 });

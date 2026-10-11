@@ -32,13 +32,13 @@ const FRAME_STYLE = `
   </style>
 `;
 
-function frameDoc(html: string, dark: boolean) {
+function frameDoc(html: string, dark: boolean, loadRemoteImages: boolean) {
   const darkCss = dark
     ? `<style>body{background:#ffffff;border-radius:8px;padding:8px;}</style>`
     : "";
   return `<!DOCTYPE html><html><head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; font-src 'self' https: data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${loadRemoteImages ? "https: " : ""}data:; style-src 'unsafe-inline'; font-src 'self' data:;">
 <base target="_blank">
 ${FRAME_STYLE}${darkCss}
 </head><body>${html}</body></html>`;
@@ -64,7 +64,7 @@ function linkify(text: string) {
   );
 }
 
-function QuotedBlock({ children, html }: { children?: string; html?: string }) {
+function QuotedBlock({ children, html, loadRemoteImages }: { children?: string; html?: string; loadRemoteImages?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-1">
@@ -78,10 +78,9 @@ function QuotedBlock({ children, html }: { children?: string; html?: string }) {
       </button>
       {open &&
         (html ? (
-          <div
-            className="mt-2 text-secondary"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
+          <div className="mt-2 text-secondary">
+            <MessageBody content={{ html, loadRemoteImages }} />
+          </div>
         ) : (
           <div className="mt-2 whitespace-pre-wrap text-secondary text-sm/5.5">
             {children}
@@ -158,7 +157,7 @@ export function MessageBody({
       observer?.disconnect();
       frame.removeEventListener("load", initialize);
     };
-  }, [html, dark]);
+  }, [html, dark, content?.loadRemoteImages]);
   if (html) {
     const truncated =
       maxChars && html.length > maxChars ? html.slice(0, maxChars) : html;
@@ -169,11 +168,11 @@ export function MessageBody({
           title="Message"
           className="body-frame"
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-          srcDoc={frameDoc(truncated, dark)}
+          srcDoc={frameDoc(truncated, dark, content?.loadRemoteImages ?? false)}
           style={{ height }}
         />
         {content?.quotedHtml && (
-          <QuotedBlock html={content.quotedHtml} />
+          <QuotedBlock html={content.quotedHtml} loadRemoteImages={content.loadRemoteImages} />
         )}
       </div>
     );

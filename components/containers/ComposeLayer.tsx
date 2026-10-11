@@ -9,6 +9,7 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { composeAccount } from "@/lib/ui/composeAccount";
 import {
   ComposeWindow,
   QuotedPreview,
@@ -286,10 +287,12 @@ function ComposePane({
   win,
   accounts,
   undoSendSeconds,
+  defaultAccountId,
 }: {
   win: ComposeWindowState;
   accounts: AccountInfo[];
   undoSendSeconds: number;
+  defaultAccountId?: string;
 }) {
   const ui = useUI();
   const router = useRouter();
@@ -325,7 +328,7 @@ function ComposePane({
   const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState("");
   const [accountId, setAccountId] = useState<string | undefined>(
-    win.accountId,
+    composeAccount(accounts, win.accountId, defaultAccountId)?.id,
   );
   const [status, setStatus] = useState<
     "idle" | "saving" | "saved" | "scheduled" | "error"
@@ -468,9 +471,7 @@ function ComposePane({
     if (saveTimer.current) clearTimeout(saveTimer.current);
     while (savingRef.current) await savingRef.current;
     const operation = async (): Promise<Id<"drafts"> | undefined> => {
-    const acct =
-      (accountId as Id<"accounts"> | undefined) ??
-      (accounts[0]?.id as Id<"accounts"> | undefined);
+    const acct = composeAccount(accounts, accountId, defaultAccountId)?.id as Id<"accounts"> | undefined;
     if (!acct) return undefined;
     setStatus((s) => (s === "scheduled" ? s : "saving"));
     try {
@@ -529,7 +530,7 @@ function ComposePane({
     savingRef.current = promise;
     try { return await promise; }
     finally { savingRef.current = null; }
-  }, [accountId, accounts, createDraft, updateDraft, to, cc, bcc, subject, win, ui]);
+  }, [accountId, accounts, defaultAccountId, createDraft, updateDraft, to, cc, bcc, subject, win, ui]);
 
   useEffect(() => { saveLatestRef.current = save; }, [save]);
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
@@ -721,7 +722,7 @@ function ComposePane({
     }
   };
 
-  const acct = accounts.find((a) => a.id === accountId) ?? accounts[0];
+  const acct = composeAccount(accounts, accountId, defaultAccountId);
 
   // Cmd+Enter to send
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -941,30 +942,25 @@ export function ComposeLayer({
   const undoSendSeconds = settings?.undoSendSeconds ?? 5;
   const isMobile = useMediaQuery("(max-width: 767px)");
   const visible = compose.filter((w) => !w.minimized);
-  const minimized = compose.filter((w) => w.minimized);
+  const activeMobile = visible.at(-1) ?? compose.at(-1);
+  const defaultAccountId = settings && "defaultAccountId" in settings ? settings.defaultAccountId : undefined;
   // Draft lifetime belongs to the store, not an animation completion callback.
-  if (compose.length === 0) return null;
-  if (isMobile) {
-    const w = visible[visible.length - 1] ?? minimized[minimized.length - 1];
-    if (!w) return null;
-    return (
-      <div key={w.id} className="compose-surface fixed inset-0 z-40 bg-app">
-        <div className="h-full [&_div[role=dialog]]:w-full [&_div[role=dialog]]:h-full [&_div[role=dialog]]:rounded-none [&_div[role=dialog]]:shadow-none">
-          <ComposePane
-            win={w}
-            accounts={accounts}
-            undoSendSeconds={undoSendSeconds}
-          />
-        </div>
-      </div>
-    );
-  }
-
+  // Wait for sender preferences before mounting a new composer.
+  if (compose.length === 0 || settings === undefined) return null;
   return (
-    <div className="fixed bottom-6 right-6 z-40 flex items-end gap-3 pointer-events-none">
+    <div className={isMobile
+      ? "fixed inset-0 z-40 pointer-events-none"
+      : "fixed bottom-6 right-6 z-40 flex items-end gap-3 pointer-events-none"}>
       {compose.map((w) => (
-        <div key={w.id} className="compose-surface pointer-events-auto">
+        // Keep every pane at the same keyed tree position across breakpoints.
+        // CSS hides background mobile panes without losing unsaved editor state.
+        <div key={w.id} className={isMobile
+          ? w.id === activeMobile?.id
+            ? "compose-surface pointer-events-auto h-full bg-app"
+            : "hidden"
+          : "compose-surface pointer-events-auto"}>
           <ComposePane
+            defaultAccountId={defaultAccountId}
             win={w}
             accounts={accounts}
             undoSendSeconds={undoSendSeconds}

@@ -75,8 +75,8 @@ export const beginSend = internalMutation({
       .collect();
     const dup = recent.find(
       (r) =>
-        r.createdAt >= since &&
-        (r.status === "sending" || r.status === "sent"),
+        r.status === "uncertain" ||
+        (r.createdAt >= since && (r.status === "sending" || r.status === "sent")),
     );
     if (dup && !args.allowDuplicate) {
       throw new Error("Possible duplicate send");
@@ -220,15 +220,31 @@ export const completeSend = internalMutation({
   },
 });
 
+// Persist before touching SMTP: a transport/action failure can hide acceptance.
+// Only definite rejections may release this reservation for a normal retry.
+export const markSendUncertain = internalMutation({
+  args: { sendLogId: v.id("sendLog"), draftId: v.optional(v.id("drafts")) },
+  handler: async (ctx, args) => {
+    const log = await ctx.db.get(args.sendLogId);
+    if (!log || log.status !== "sending") throw new Error("Send is not reserved");
+    await ctx.db.patch(log._id, { status: "uncertain" });
+    if (args.draftId) {
+      const draft = await ctx.db.get(args.draftId);
+      if (draft) await ctx.db.patch(draft._id, { status: "uncertain" });
+    }
+  },
+});
+
 export const failSend = internalMutation({
   args: {
     sendLogId: v.id("sendLog"),
     draftId: v.optional(v.id("drafts")),
     error: v.string(),
+    definiteRejection: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const log = await ctx.db.get(args.sendLogId);
-    if (log && log.status === "sending") {
+    if (log && (log.status === "sending" || (log.status === "uncertain" && args.definiteRejection))) {
       await ctx.db.patch(args.sendLogId, {
         status: "failed",
         error: args.error.slice(0, 500),
@@ -236,7 +252,7 @@ export const failSend = internalMutation({
     }
     if (args.draftId) {
       const draft = await ctx.db.get(args.draftId);
-      if (draft) {
+      if (draft && (draft.status === "sending" || (draft.status === "uncertain" && args.definiteRejection))) {
         await ctx.db.patch(args.draftId, {
           status: "failed",
           sendError: args.error.slice(0, 500),
@@ -358,6 +374,9 @@ async function executeSend(
     const existing = begin.existing;
     if (existing.status === "failed") {
       throw new Error(existing.error ?? "Previous send failed");
+    }
+    if (existing.status === "uncertain") {
+      throw new Error("Delivery is uncertain. Check Sent before sending again.");
     }
     if (args.draftId) {
       // No SMTP attempt will complete this claim. Keep a different draft
@@ -697,6 +716,7 @@ export const claimDraftForSend = internalMutation({
     // It must not claim a newer schedule before that schedule is due.
     if (args.scheduledOnly && (draft.status !== "scheduled" || draft.scheduledAt === undefined || draft.scheduledAt > Date.now())) return null;
     if (draft.status === "sending") throw new Error("Draft is already sending");
+    if (draft.status === "uncertain") throw new Error("Delivery is uncertain. Check Sent before sending again.");
     if (draft.to.length + draft.cc.length + draft.bcc.length === 0) throw new Error("Add at least one recipient before sending");
     if (!args.scheduledOnly && draft.scheduledJobId) await ctx.scheduler.cancel(draft.scheduledJobId).catch(() => {});
     await ctx.db.patch(draft._id, { status: "sending", scheduledAt: undefined, scheduledJobId: undefined });

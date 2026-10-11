@@ -524,12 +524,10 @@ async function diffFolderFlags(
   const updates: ({ uid: number } & FlagBits)[] = [];
   for await (const row of imap.fetchFlags(folder.path, { changedSince })) {
     const mask = flagMask(row.flags);
-    if (fs.has(row.uid)) {
-      if (fs.getMask(row.uid) === mask) continue;
-      fs.setMask(row.uid, mask);
-    } else {
-      fs.addSynced(row.uid, mask);
-    }
+    // A flag-only fetch is not ingestion. Older, unloaded UIDs must remain
+    // outside the synced window so backfill can still fetch their contents.
+    if (!fs.has(row.uid) || fs.getMask(row.uid) === mask) continue;
+    fs.setMask(row.uid, mask);
     updates.push({ uid: row.uid, ...row.flags });
   }
   return updates;
@@ -845,6 +843,9 @@ async function syncRemoteDrafts(
   const serverByUid = new Map(docs.map((d) => [d.uid, d]));
 
   const byPostId = new Map(drafts.map((d) => [d.messageIdHeader, d]));
+  const importedUids = new Set(drafts
+    .filter(d => d.remoteFolderId === draftsFolder._id && d.remoteUid !== undefined)
+    .map(d => d.remoteUid));
   let imported = 0;
   for (const d of docs) {
     if (d.uid === undefined) continue;
@@ -859,6 +860,7 @@ async function syncRemoteDrafts(
       continue;
     }
     if (d.postDraftId) continue; // foreign Post draft owned by another client
+    if (importedUids.has(d.uid)) continue;
     if (imported >= MAX_REMOTE_DRAFT_IMPORTS) continue;
     imported++;
     outcome.changed = true;
@@ -1050,6 +1052,9 @@ async function executeOp(
             targetPath,
             undefined,
           );
+          for (const f of state?.folders ?? []) {
+            syncedByPath.set(f.path, new Set([...iter(parseUidSet(f.syncedUids))]));
+          }
         }
         continue;
       }
@@ -1070,6 +1075,9 @@ async function executeOp(
           targetPath,
           newUid,
         );
+        for (const f of state?.folders ?? []) {
+          syncedByPath.set(f.path, new Set([...iter(parseUidSet(f.syncedUids))]));
+        }
       }
     }
     return;
@@ -1078,7 +1086,9 @@ async function executeOp(
   if (op.kind === "expunge") {
     const expunges: { folderPath: string; uid: number; messageId?: string }[] =
       op.payload.expunges ?? [];
-    const resolved = await resolveOpTargets(store, expunges);
+    // Permanent deletion has already removed the local message document.
+    // Its queued folder/UID remain the durable remote deletion target.
+    const resolved = await resolveOpTargets(store, expunges, true);
     const byPath = new Map<string, number[]>();
     for (let i = 0; i < expunges.length; i++) {
       const r = resolved[i];
@@ -1145,6 +1155,7 @@ interface ResolvedTarget {
 async function resolveOpTargets(
   store: StorePort,
   items: OpItem[],
+  allowDeleted = false,
 ): Promise<(ResolvedTarget | null)[]> {
   const ids = items
     .map((i) => i.messageId)
@@ -1153,7 +1164,10 @@ async function resolveOpTargets(
   return items.map((item) => {
     if (item.messageId) {
       const r = refs[item.messageId];
-      if (!r || r.uid === undefined || !r.folderPath) return null;
+      if (!r) return allowDeleted
+        ? { path: item.folderPath, uid: item.uid, folderRole: "" }
+        : null;
+      if (r.uid === undefined || !r.folderPath) return null;
       return { path: r.folderPath, uid: r.uid, folderRole: r.folderRole };
     }
     return { path: item.folderPath, uid: item.uid, folderRole: "" };
@@ -1204,4 +1218,9 @@ async function applyMoveResult(
     ],
     folderPatches,
   );
+  // Subsequent moves in this batch must start from the newly committed sets.
+  for (const { folderId, patch } of folderPatches) {
+    const folder = state?.folders.find(f => f._id === folderId);
+    if (folder) Object.assign(folder, patch);
+  }
 }

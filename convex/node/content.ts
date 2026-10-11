@@ -10,6 +10,7 @@ import { MailParserPort } from "./mailParser";
 import { decryptCredentials } from "./crypto";
 import { rewriteCidReferences, blockRemoteImages } from "../lib/html";
 import { splitHtmlQuote, splitTextQuote } from "../lib/quoteSplit";
+import type { ParsedMail } from "../lib/ports";
 
 const ATTACHMENT_MAX = 20 * 1024 * 1024;
 const INLINE_CID_MAX = 3 * 1024 * 1024;
@@ -117,9 +118,21 @@ async function resolveRemote(
 
 const parser = new MailParserPort();
 
+interface MessageContentResult {
+  html?: string;
+  quotedHtml?: string;
+  text?: string;
+  quotedText?: string;
+  attachments: Pick<ParsedMail["attachments"][number], "id" | "filename" | "contentType" | "size" | "inline">[];
+  headers: Pick<ParsedMail, "date" | "from" | "to" | "cc" | "replyTo"> & { listUnsubscribe?: string };
+  remoteImagesBlocked: number;
+  loadRemoteImages?: boolean;
+  accountId: string;
+}
+
 export const getMessageContent = internalAction({
   args: { messageId: v.id("messages") },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<MessageContentResult> => {
     const resolved = await resolveRemote(ctx, args.messageId);
     if ("moved" in resolved) {
       throw new Error(
@@ -137,7 +150,7 @@ export const getMessageContent = internalAction({
         internal.syncStore.settingsForUser,
         { userId: ref!.message.userId },
       );
-      const loadRemote = settings?.loadRemoteImages ?? false;
+      const loadRemote: boolean = settings?.loadRemoteImages ?? false;
 
       const cidMap = new Map<string, string>();
       let inlineTotal = 0;
@@ -188,6 +201,7 @@ export const getMessageContent = internalAction({
             listUnsubscribe: parsed.headers["list-unsubscribe"],
           },
           remoteImagesBlocked,
+          loadRemoteImages: loadRemote,
           accountId: accountId as string,
         };
       }

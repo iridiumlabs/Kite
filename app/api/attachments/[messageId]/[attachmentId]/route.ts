@@ -59,7 +59,8 @@ export async function GET(
     return new NextResponse(msg, { status });
   }
 
-  const inline = result.contentType.startsWith("image/");
+  // SVG is an active document when opened directly on the app origin.
+  const inline = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/bmp"]).has(result.contentType.toLowerCase());
   return new NextResponse(result.data, {
     headers: {
       "Content-Type": result.contentType || "application/octet-stream",
@@ -69,6 +70,7 @@ export async function GET(
         inline,
       ),
       "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline';",
       "Cache-Control": "private, max-age=60",
     },
   });

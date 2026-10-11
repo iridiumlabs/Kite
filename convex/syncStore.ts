@@ -898,6 +898,10 @@ export const importRemoteDraft = internalMutation({
     attachments: v.array(draftAttachmentV),
   },
   handler: async (ctx, args) => {
+    const existing = await ctx.db.query("drafts")
+      .withIndex("by_remote", q => q.eq("remoteFolderId", args.remoteFolderId).eq("remoteUid", args.remoteUid))
+      .first();
+    if (existing) return existing._id;
     const now = Date.now();
     const id = await ctx.db.insert("drafts", {
       userId: args.userId,

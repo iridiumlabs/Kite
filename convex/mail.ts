@@ -778,7 +778,7 @@ export const findMessages = query({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
-    const limit = Math.min(args.limit ?? 50, 100);
+    const limit = Math.max(1, Math.min(Math.floor(args.limit ?? 50), 100));
     if (args.accountId) {
       const account = await ctx.db.get(args.accountId);
       if (!account || account.userId !== userId) {
@@ -793,14 +793,12 @@ export const findMessages = query({
     const roles = args.view ? VIEW_ROLES[args.view] : ALL_ROLES;
 
     let ri = 0;
-    let cursorDate: number | undefined;
-    let skipIds = new Set<string>();
+    let roleCursor: string | null = null;
     if (args.cursor) {
       try {
         const decoded = JSON.parse(args.cursor);
         ri = decoded.ri ?? 0;
-        cursorDate = decoded.d;
-        skipIds = new Set(decoded.skip ?? []);
+        roleCursor = decoded.c ?? null;
       } catch {
         throw new Error("Invalid cursor");
       }
@@ -849,18 +847,15 @@ export const findMessages = query({
 
     const items: Doc<"messages">[] = [];
     let examined = 0;
-    let nextCursor:
-      | { ri: number; d?: number; skip?: string[] }
-      | null = null;
+    let nextCursor: { ri: number; c: string | null } | null = null;
 
-    while (
-      ri < roles.length &&
-      examined < FIND_SCAN_BUDGET &&
-      items.length < limit
-    ) {
+    // Convex permits only one native paginated query per function execution.
+    // A sparse page may be empty; its cursor still advances to older mail or
+    // the next role, and callers keep following it until isDone.
+    if (ri < roles.length) {
       const role = roles[ri];
       const budget = FIND_SCAN_BUDGET - examined;
-      const docs = await ctx.db
+      const page = await ctx.db
         .query("messages")
         .withIndex(
           args.accountId ? "by_account_role_date" : "by_user_role_date",
@@ -868,14 +863,7 @@ export const findMessages = query({
             const base = args.accountId
               ? q.eq("accountId", args.accountId!).eq("folderRole", role)
               : q.eq("userId", userId).eq("folderRole", role);
-            // One upper bound call maximum: cursorDate is inclusive, so it
-            // becomes an exclusive bound half a millisecond above it.
-            const upper = Math.min(
-              args.before ?? Number.POSITIVE_INFINITY,
-              cursorDate !== undefined
-                ? cursorDate + 0.5
-                : Number.POSITIVE_INFINITY,
-            );
+            const upper = args.before ?? Number.POSITIVE_INFINITY;
             const hasUpper = upper !== Number.POSITIVE_INFINITY;
             if (args.after !== undefined && hasUpper) {
               return base.gt("date", args.after).lt("date", upper);
@@ -886,31 +874,26 @@ export const findMessages = query({
           },
         )
         .order("desc")
-        .take(budget);
+        .paginate({
+          cursor: roleCursor,
+          // Never fetch more potential matches than this result page can hold.
+          numItems: Math.min(budget, limit - items.length),
+        });
 
-      examined += docs.length;
-      const exhausted = docs.length < budget;
-      for (const m of docs) {
-        if (cursorDate !== undefined && m.date === cursorDate && skipIds.has(m._id)) {
-          continue;
-        }
+      examined += page.page.length;
+      for (const m of page.page) {
         if (matches(m)) items.push(m);
       }
 
-      if (exhausted) {
+      if (page.isDone) {
         ri++;
-        cursorDate = undefined;
-        skipIds = new Set();
-        nextCursor = { ri };
+        roleCursor = null;
       } else {
-        const last = docs[docs.length - 1];
-        const skip = docs
-          .filter((m) => m.date === last.date)
-          .filter((m) => skipIds.has(m._id) || items.some((i) => i._id === m._id))
-          .map((m) => m._id as string);
-        nextCursor = { ri, d: last.date, skip };
-        break;
+        roleCursor = page.continueCursor;
       }
+      // Native index cursors preserve ties, including nonmatching rows, without
+      // dropping unreturned matches or rescanning a large same-date group.
+      nextCursor = { ri, c: roleCursor };
     }
 
     items.sort((a, b) => b.date - a.date);
@@ -1080,6 +1063,10 @@ export const suggestRecipients = query({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
+    if (args.accountId) {
+      const account = await ctx.db.get(args.accountId);
+      if (!account || account.userId !== userId) throw new Error("Account not found");
+    }
     const prefix = args.prefix.trim().toLowerCase();
     const limit = Math.min(args.limit ?? 8, 20);
     if (prefix.length === 0) return [];

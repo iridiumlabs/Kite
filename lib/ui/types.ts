@@ -75,6 +75,7 @@ export interface MessageContent {
   quotedText?: string;
   quotedHtml?: string;
   remoteImagesBlocked?: number;
+  loadRemoteImages?: boolean;
   attachments?: AttachmentInfo[];
   /** Set when the fetch failed; MessageBody renders an inline error + Retry */
   error?: string;

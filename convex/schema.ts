@@ -285,6 +285,7 @@ export default defineSchema({
       v.literal("editing"),
       v.literal("scheduled"),
       v.literal("sending"),
+      v.literal("uncertain"),
       v.literal("failed"),
     ),
     sendError: v.optional(v.string()),
@@ -296,7 +297,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_user_updated", ["userId", "updatedAt"])
-    .index("by_account", ["accountId", "updatedAt"]),
+    .index("by_account", ["accountId", "updatedAt"])
+    .index("by_remote", ["remoteFolderId", "remoteUid"]),
 
   pendingOps: defineTable({
     userId: v.string(),
@@ -324,6 +326,7 @@ export default defineSchema({
     contentHash: v.string(),
     status: v.union(
       v.literal("sending"),
+      v.literal("uncertain"),
       v.literal("sent"),
       v.literal("failed"),
     ),

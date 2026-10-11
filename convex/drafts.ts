@@ -71,6 +71,7 @@ async function ownedDraft(
   const draft = await ctx.db.get(draftId);
   if (!draft || draft.userId !== userId) throw new Error("Draft not found");
   if (draft.status === "sending") throw new Error("Draft is already sending");
+  if (draft.status === "uncertain") throw new Error("Delivery is uncertain. Check Sent before sending again.");
   return draft;
 }
 
