@@ -24,7 +24,7 @@ export const create = mutation({
     ...apiKeyArg,
     name: v.string(),
     description: v.string(),
-    color: v.string(),
+    color: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
@@ -38,7 +38,7 @@ export const create = mutation({
       userId,
       name: args.name,
       description: args.description,
-      color: args.color,
+      color: args.color ?? "#0a84ff",
       sortOrder,
       createdAt: Date.now(),
     });

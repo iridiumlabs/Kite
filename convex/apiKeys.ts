@@ -6,7 +6,7 @@ import {
   query,
 } from "./_generated/server";
 import { requireClerkUserId } from "./model/auth";
-import { generateApiKey } from "./lib/apiKeyFormat";
+import { generateApiKey, hashApiKey } from "./lib/apiKeyFormat";
 
 // Key management is Clerk-authenticated only: an API key must not be able to
 // mint or revoke other keys.
@@ -54,6 +54,22 @@ export const revoke = mutation({
     if (doc.revokedAt === undefined) {
       await ctx.db.patch(args.apiKeyId, { revokedAt: Date.now() });
     }
+  },
+});
+
+// Resolves a raw API key to its owner for the MCP endpoint's bearer-token
+// verification. A query, so it never writes lastUsedAt; the throttled touch
+// happens inside the apiKey-authorized functions themselves.
+export const whoami = query({
+  args: { apiKey: v.string() },
+  handler: async (ctx, args) => {
+    const hash = await hashApiKey(args.apiKey);
+    const keyDoc = await ctx.db
+      .query("apiKeys")
+      .withIndex("by_hash", (q) => q.eq("hash", hash))
+      .unique();
+    if (!keyDoc || keyDoc.revokedAt !== undefined) return null;
+    return { userId: keyDoc.userId, keyName: keyDoc.name };
   },
 });
 

@@ -93,6 +93,7 @@ export const generateUploadUrl = mutation({
 export const list = query({
   args: {
     ...apiKeyArg,
+    accountId: v.optional(v.id("accounts")),
     paginationOpts: v.object({
       numItems: v.number(),
       cursor: v.union(v.string(), v.null()),
@@ -100,6 +101,35 @@ export const list = query({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
+    if (args.accountId) {
+      const account = await ctx.db.get(args.accountId);
+      if (!account || account.userId !== userId) {
+        throw new Error("Account not found");
+      }
+      return await ctx.db
+        .query("drafts")
+        .withIndex("by_account", (q) => q.eq("accountId", args.accountId!))
+        .collect()
+        .then((rows) => rows.sort((a, b) => b.updatedAt - a.updatedAt))
+        .then((rows) => {
+          // Account-scoped listing is bounded in practice; apply the same
+          // pagination contract client-side.
+          const start = args.paginationOpts.cursor
+            ? rows.findIndex((r) => r._id === args.paginationOpts.cursor) + 1
+            : 0;
+          const page = rows.slice(
+            Math.max(start, 0),
+            Math.max(start, 0) + args.paginationOpts.numItems,
+          );
+          const last = page[page.length - 1];
+          const done = start + page.length >= rows.length;
+          return {
+            page,
+            isDone: done,
+            continueCursor: done || !last ? "" : (last._id as string),
+          };
+        });
+    }
     const result = await ctx.db
       .query("drafts")
       .withIndex("by_user_updated", (q) => q.eq("userId", userId))

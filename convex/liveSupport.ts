@@ -2,6 +2,23 @@
 // local deployment. Not user-facing.
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
+import { generateApiKey } from "./lib/apiKeyFormat";
+
+// Mints a real API key for a fixed user id (no Clerk session in scripts).
+export const mintApiKey = internalMutation({
+  args: { userId: v.string(), name: v.string() },
+  handler: async (ctx, args) => {
+    const { key, hash, prefix } = await generateApiKey();
+    const id = await ctx.db.insert("apiKeys", {
+      userId: args.userId,
+      name: args.name,
+      prefix,
+      hash,
+      createdAt: Date.now(),
+    });
+    return { id, key };
+  },
+});
 
 export const foldersForAccount = internalQuery({
   args: { accountId: v.id("accounts") },

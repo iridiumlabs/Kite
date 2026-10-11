@@ -15,9 +15,11 @@
   },
   "dependencies": {
     "@clerk/nextjs": "7.9.10",
+    "@modelcontextprotocol/server": "^2.3.1",
     "convex": "1.46.0",
     "imapflow": "2.2.0",
     "mailparser": "3.9.35",
+    "mcp-handler": "^2.3.0",
     "next": "16.3.8",
     "nodemailer": "10.0.14",
     "react": "19.3.0",
@@ -27,6 +29,7 @@
   },
   "devDependencies": {
     "@edge-runtime/vm": "5.0.0",
+    "@modelcontextprotocol/client": "^2.3.1",
     "@tailwindcss/postcss": "4.3.3",
     "@types/mailparser": "^3.9.0",
     "@types/node": "24.19.0",
