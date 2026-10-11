@@ -64,7 +64,7 @@ export function ProfileMenu(p: ProfileMenuProps) {
     <Menu.Root defaultOpen={p.defaultOpen}>
       <Menu.Trigger className="flex items-center h-8 pr-2 pl-1.5 rounded-[7px] gap-2 w-full text-left mail-row cursor-default select-none outline-none">
         <Avatar name={p.user.name} self size={22} rounded="md" />
-        <div className="tracking-[-0.005em] font-semibold text-primary text-[13px]/4 line-clamp-1 grow min-w-0">
+        <div className="tracking-[-0.005em] font-semibold text-primary text-[13px]/4 line-clamp-1 min-w-0">
           {p.user.name}
         </div>
         <ChevronsUpDown className="text-tertiary shrink-0" />

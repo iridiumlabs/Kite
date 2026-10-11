@@ -4,6 +4,7 @@
 // Opt-in: requires `next dev` on :3000 and the local Convex backend on :3210.
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api";
+import type { Id } from "../convex/_generated/dataModel";
 import { ImapFlow } from "imapflow";
 import { createRequire } from "node:module";
 import { mkdir } from "node:fs/promises";
@@ -20,6 +21,7 @@ type Eth = { user: string; pass: string };
 const require_ = createRequire(import.meta.url);
 const failures: string[] = [];
 const notes: string[] = [];
+const cleanupTasks: (() => Promise<unknown>)[] = [];
 
 function ok(name: string, cond: unknown, detail?: string) {
   if (cond) {
@@ -124,13 +126,13 @@ function seedMails(A: Eth): Mail[] {
       text: "Can we go over the import flow on Thursday? I put together notes on the three rough edges we saw.",
       messageId: `<${TAG}-1@x>`,
     }),
-    mk(maya, `${TAG} Re: Thursday walkthrough notes`, {
+    mk(maya, `Re: ${TAG} Thursday walkthrough notes`, {
       text: "Yes. I will bring the label mapping spreadsheet and we can pair on it after.",
       inReplyTo: `<${TAG}-1@x>`,
       references: `<${TAG}-1@x>`,
       messageId: `<${TAG}-2@x>`,
     }),
-    mk(lena, `${TAG} Re: Thursday walkthrough notes`, {
+    mk(lena, `Re: ${TAG} Thursday walkthrough notes`, {
       text: "Perfect. Adding the progress count fix to the list.",
       inReplyTo: `<${TAG}-2@x>`,
       references: `<${TAG}-1@x> <${TAG}-2@x>`,
@@ -230,8 +232,9 @@ async function seedImap(A: Eth) {
     port: 993,
     secure: true,
     auth: { user: A.user, pass: A.pass },
-    logger: false,
+    logger: false, disableAutoIdle: true, socketTimeout: 30_000, greetingTimeout: 15_000,
   });
+  imap.on("error", () => {});
   await imap.connect();
   try {
     for (const m of seedMails(A)) {
@@ -248,16 +251,18 @@ async function openThread(
   page: Page,
   subject: string,
 ): Promise<"primary" | "other"> {
+  subject = subject.replace(`${TAG} `, "");
   for (const view of ["primary", "other"] as const) {
     await page.goto(`${BASE}/mail/${view}`, { waitUntil: "networkidle" });
-    const row = page.locator(`text=${subject}`).first();
+    const row = page.getByRole("option").filter({ hasText: TAG }).filter({ hasText: subject }).first();
     const found = await row
       .waitFor({ state: "visible", timeout: 8_000 })
       .then(() => true)
       .catch(() => false);
     if (found) {
       await row.click();
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(300);
+      await page.waitForFunction(() => document.querySelectorAll('[aria-label="Loading"]').length === 0, undefined, { timeout: 30_000 });
       return view;
     }
   }
@@ -266,7 +271,7 @@ async function openThread(
 
 async function shot(page: Page, name: string) {
   const file = path.join(OUT, `${name}.png`);
-  await page.screenshot({ path: file });
+  await page.screenshot({ path: file, animations: "disabled", mask: [page.locator("code")] });
   console.log(`  shot ${name}.png`);
 }
 
@@ -294,6 +299,7 @@ async function main() {
     smtpPort: 587,
     smtpSecure: false,
   })) as { accountId: string };
+  cleanupTasks.push(() => client.mutation(api.accounts.remove, { accountId: accountId as Id<"accounts"> }));
   ok("account connect", !!accountId, accountId);
 
   // 3. seed + sync. The connect-time initial sync may run while appends are
@@ -304,6 +310,7 @@ async function main() {
     (
       (await client.query(api.mail.listThreads, {
         view: v,
+        accountId: accountId as Id<"accounts">,
         paginationOpts: { numItems: 50, cursor: null },
       })) as { page: unknown[] }
     ).page.length;
@@ -322,12 +329,18 @@ async function main() {
   const oCount = await countView("other");
   note(`primary: ${pCount} other: ${oCount}`);
 
-  // create a category for the assignment step
-  await client.mutation(api.categories.create, {
-    name: "Receipts",
-    description: "Order confirmations and invoices",
-    color: "#34C759",
+  // Reuse an existing category without violating unique-name rules.
+  const existingCategory = (await client.query(api.categories.list, {})).find(c => c.name.toLowerCase() === "receipts");
+  const createdCategoryId = existingCategory ? undefined : await client.mutation(api.categories.create, {
+    name: "Receipts", description: "Order confirmations and invoices", color: "#34C759",
   });
+  if (createdCategoryId) cleanupTasks.push(() => client.mutation(api.categories.remove, { categoryId: createdCategoryId }));
+  cleanupTasks.push(async () => {
+    for (const key of await client.query(api.apiKeys.list, {})) {
+      if (key.name === `${TAG}-key` && !key.revokedAt) await client.mutation(api.apiKeys.revoke, { apiKeyId: key._id });
+    }
+  });
+  let secondAccountId: Id<"accounts"> | undefined;
 
   // 4. drive the app
   const browser = await chromium.launch();
@@ -351,15 +364,19 @@ async function main() {
 
     // open a thread
     await openThread(page, "Thursday walkthrough");
-    await page.waitForSelector("text=Re: Thursday", { timeout: 10_000 });
+    await page.getByRole("heading").filter({ hasText: "Thursday walkthrough" }).waitFor({ timeout: 10_000 });
     await shot(page, "02-reader");
     ok("thread opens in reader", true);
 
-    // j/k keyboard navigation in reader
+    // The seeded conversation is the oldest row, so go up then back down.
+    const conversationUrl = page.url();
+    await page.keyboard.press("k");
+    await page.waitForTimeout(400);
+    ok("k navigates to previous thread", page.url() !== conversationUrl);
     await page.keyboard.press("j");
     await page.waitForTimeout(400);
     await shot(page, "03-keyboard-next");
-    ok("j navigates to next thread", true);
+    ok("j navigates back to the conversation", page.url() === conversationUrl);
 
     // back to list, star a row
     await page.keyboard.press("Escape");
@@ -372,7 +389,10 @@ async function main() {
     await page.keyboard.press("s");
     await page.waitForTimeout(400);
     await shot(page, "04-star");
-    ok("s stars focused thread", true);
+    ok("s stars focused thread", await waitFor("star persisted", async () => {
+      const rows = await client.query(api.mail.listThreads, { view: "starred", paginationOpts: { numItems: 50, cursor: null } });
+      return rows.page.some(t => t.subject.includes(TAG));
+    }, 10_000));
 
     // archive with undo
     await page.keyboard.press("e");
@@ -398,7 +418,7 @@ async function main() {
     ok("u toggles read state", true);
 
     // open the attachment thread and download an attachment
-    const attView = await openThread(page, "Report and screenshots");
+    const attView = await openThread(page, `${TAG} Report and screenshots`);
     const attBtn = page.locator("text=quarterly-report.pdf").first();
     const hasAtt = await attBtn
       .waitFor({ state: "visible", timeout: 30_000 })
@@ -406,6 +426,12 @@ async function main() {
       .catch(() => false);
     await shot(page, "08-attachments");
     ok("attachment card visible", hasAtt);
+    const frame = page.frameLocator('iframe[title="Message"]').first();
+    await frame.locator('img[src^="data:image/png;base64,"]').waitFor({ timeout: 30_000 });
+    ok("inline CID image renders", await frame.locator("img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0));
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLIFrameElement>('iframe[title="Message"]')].every(f =>
+      !!f.contentDocument?.body && f.getBoundingClientRect().height + 1 >= f.contentDocument.body.scrollHeight));
+    ok("HTML reader fits the complete message body", true);
     if (hasAtt) {
       const [dl] = await Promise.all([
         page.waitForEvent("download", { timeout: 45_000 }).catch(() => null),
@@ -548,7 +574,16 @@ async function main() {
       .locator('input[placeholder="Subject"]')
       .inputValue();
     ok("reply prefills subject", replySubject.startsWith("Re:"));
-    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Quoted text", exact: false }).waitFor({ timeout: 30_000 });
+    await page.locator('[role="dialog"] .ProseMirror').fill("Thanks, this is the live quoted reply.");
+    await page.click('[role="dialog"] button:has-text("Send")');
+    ok("reply sends with original quoted body", await waitFor("quoted reply", async () => {
+      const rows = await client.query(api.mail.listMessagesByRole, { role: "sent", accountId: accountId as Id<"accounts">, paginationOpts: { numItems: 50, cursor: null } });
+      const reply = rows.page.find(m => m.snippet.startsWith("Thanks, this is the live quoted reply."));
+      if (!reply) return false;
+      const content = await client.action(api.content.getMessageContent, { messageId: reply._id });
+      return JSON.stringify(content).includes("Adding the progress count fix");
+    }, 90_000));
 
     // settings + API key
     await page.keyboard.press("Control+,");
@@ -556,7 +591,7 @@ async function main() {
     await shot(page, "14-settings-general");
     await page.click("text=MCP & API Keys");
     await page.waitForTimeout(500);
-    await page.fill('input[placeholder*="Key name"]', "ui-e2e-key");
+    await page.fill('input[placeholder*="Key name"]', `${TAG}-key`);
     await page.click('button:has-text("Create key")');
     await page.waitForSelector("text=will not be shown again", {
       timeout: 8_000,
@@ -567,6 +602,124 @@ async function main() {
     await page.waitForTimeout(400);
     await shot(page, "16-shortcuts");
     await page.keyboard.press("Escape");
+
+    // Wait out Settings dismissal before opening a new floating surface.
+    await page.getByRole("button", { name: "Close settings", exact: true }).waitFor({ state: "hidden" });
+    // A modal above an actual open composer must own hit-testing and focus.
+    await page.getByRole("button", { name: "Compose", exact: true }).click();
+    await page.getByRole("dialog", { name: "New message", exact: true }).waitFor();
+    await page.getByRole("button", { name: "New category", exact: true }).click();
+    const categoryDialog = page.getByRole("dialog", { name: "New category", exact: true });
+    await categoryDialog.waitFor();
+    ok("composer remains mounted beneath category dialog", await page.locator('[role="dialog"][aria-label="New message"]').count() === 1);
+    ok("category dialog layers above compose", await categoryDialog.evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+    }));
+    await shot(page, "19-dialog-layering");
+    await page.keyboard.press("Escape");
+    await categoryDialog.waitFor({ state: "hidden" });
+    await page.getByRole("dialog", { name: "New message", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
+
+    // Snooze through the toolbar, verify both views, and unsnooze through UI.
+    await openThread(page, `${TAG} Dinner next week?`);
+    await page.getByRole("button", { name: "Snooze", exact: true }).click();
+    await page.getByRole("button", { name: "Tomorrow", exact: true }).click();
+    const snoozed = await waitFor("snooze persisted", async () => {
+      const result = await client.query(api.mail.listThreads, { view: "snoozed", paginationOpts: { numItems: 50, cursor: null } });
+      return result.page.some(t => t.subject === `${TAG} Dinner next week?`);
+    }, 15_000);
+    ok("snooze moves thread to Snoozed", snoozed);
+    await page.goto(`${BASE}/mail/snoozed`, { waitUntil: "networkidle" });
+    await page.getByText(`${TAG} Dinner next week?`, { exact: true }).first().click();
+    await shot(page, "19-snoozed");
+    await page.getByRole("button", { name: "Snooze", exact: true }).click();
+    await page.getByRole("button", { name: "Unsnooze", exact: true }).click();
+    await openThread(page, `${TAG} Dinner next week?`);
+    ok("unsnooze restores original inbox", true);
+    await page.keyboard.press("Escape");
+
+    // Schedule from the real compose UI, then observe the actual scheduled SMTP send.
+    await page.getByRole("button", { name: "Compose", exact: true }).click();
+    await page.getByRole("dialog", { name: "New message", exact: true }).waitFor();
+    const compose = page.locator('[role="dialog"]');
+    await compose.locator("input").first().fill("scheduled-recipient@example.com");
+    await compose.locator("input").first().press("Enter");
+    await page.getByPlaceholder("Subject", { exact: true }).fill(`${TAG} scheduled from UI`);
+    await compose.locator(".ProseMirror").fill("Scheduled delivery from Post.");
+    await page.getByRole("button", { name: "Schedule send", exact: true }).click();
+    const sendAt = new Date(Date.now() + 90_000);
+    const localDate = new Date(sendAt.getTime() - sendAt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    await page.locator('input[type="datetime-local"]').fill(localDate);
+    await shot(page, "20-schedule-popover");
+    await page.getByRole("button", { name: "Set", exact: true }).click();
+    ok("scheduled draft persisted", await waitFor("scheduled draft", async () => {
+      const drafts = await client.query(api.drafts.list, { paginationOpts: { numItems: 50, cursor: null } });
+      return drafts.page.some(d => d.subject === `${TAG} scheduled from UI` && d.status === "scheduled");
+    }, 15_000));
+    ok("scheduled send lands in Sent", await waitFor("scheduled delivery", async () => {
+      const sent = await client.query(api.mail.listMessagesByRole, { role: "sent", paginationOpts: { numItems: 50, cursor: null } });
+      return sent.page.some(m => m.subject === `${TAG} scheduled from UI`);
+    }, 180_000));
+
+    const cancelledDraftId = await client.mutation(api.drafts.create, { accountId: accountId as Id<"accounts">, to: [{ email: "cancel@example.com" }], subject: `${TAG} cancel schedule`, text: "Do not send" });
+    await client.mutation(api.drafts.scheduleSend, { draftId: cancelledDraftId, at: Date.now() + 86_400_000 });
+    await page.goto(`${BASE}/mail/drafts`, { waitUntil: "networkidle" });
+    await page.getByText(`${TAG} cancel schedule`, { exact: true }).first().click();
+    await page.getByRole("button", { name: "Cancel schedule", exact: true }).click();
+    ok("scheduled send can be cancelled in UI", await waitFor("schedule cancellation", async () => (await client.query(api.drafts.get, { draftId: cancelledDraftId }))?.status === "editing", 10_000));
+    await page.keyboard.press("Escape");
+    await client.mutation(api.drafts.discard, { draftId: cancelledDraftId });
+
+    // Two real mailboxes with the same subject must remain account-isolated.
+    const second = await createEtherealAccount();
+    secondAccountId = (await client.action(api.accounts.connect, {
+      email: second.user, password: second.pass, displayName: "UI E2E second",
+      imapHost: "imap.ethereal.email", imapPort: 993,
+      smtpHost: "smtp.ethereal.email", smtpPort: 587, smtpSecure: false,
+    })).accountId;
+    const secondId = secondAccountId;
+    cleanupTasks.push(() => client.mutation(api.accounts.remove, { accountId: secondId }));
+    const imap = new ImapFlow({ host: "imap.ethereal.email", port: 993, secure: true, auth: { user: second.user, pass: second.pass }, logger: false, disableAutoIdle: true, socketTimeout: 30_000 });
+    imap.on("error", () => {});
+    await imap.connect();
+    try { await imap.append("INBOX", await rawMime({ from: "second-sender@example.com", to: second.user, subject: `${TAG} Thursday walkthrough notes`, text: "Only in mailbox two.", messageId: `<${TAG}-1@x>` }), []); }
+    finally { await imap.logout().catch(() => {}); }
+    ok("second mailbox syncs independently", await waitFor("second mailbox", async () => {
+      await client.mutation(api.accounts.syncNow, { accountId: secondAccountId });
+      const rows = await client.query(api.mail.listThreads, { view: "account", accountId: secondAccountId, paginationOpts: { numItems: 50, cursor: null } });
+      return rows.page.length === 1 && rows.page[0].messageCount === 1;
+    }, 150_000));
+    await page.goto(`${BASE}/mail/account/${secondAccountId}`, { waitUntil: "networkidle" });
+    await page.getByText(`${TAG} Thursday walkthrough notes`, { exact: true }).first().click();
+    await page.getByText("Only in mailbox two.", { exact: true }).last().waitFor({ timeout: 30_000 });
+    await shot(page, "21-second-account");
+    const accountRows = await client.query(api.mail.listThreads, { view: "account", accountId: accountId as Id<"accounts">, paginationOpts: { numItems: 50, cursor: null } });
+    ok("matching Message-ID does not merge across accounts", accountRows.page.some(t => t.subject.includes(`${TAG} Thursday walkthrough notes`) && t.messageCount >= 3));
+
+    // Drawer navigation on tablet and phone; category dialog must be above compose.
+    for (const width of [1024, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto(`${BASE}/mail/primary`, { waitUntil: "networkidle" });
+      await page.getByRole("button", { name: "Mailboxes" }).click();
+      await page.getByRole("button", { name: "Other", exact: false }).first().click();
+      await page.waitForURL("**/mail/other");
+      ok(`drawer navigates at ${width}px`, !await page.getByRole("button", { name: "Mailboxes" }).evaluate(el => el.closest('[inert]') !== null));
+      await shot(page, `22-mobile-${width}`);
+      if (width === 390) {
+        const subject = page.getByText(`${TAG} your receipt`, { exact: true });
+        const box = await subject.boundingBox();
+        ok("phone list subject fits the viewport", !!box && box.x >= 0 && box.x + box.width <= width);
+        await subject.click();
+        await page.getByRole("heading", { name: `${TAG} your receipt` }).waitFor();
+        await shot(page, "23-phone-reader");
+        await page.getByRole("button", { name: "Back", exact: true }).click();
+        await page.waitForURL("**/mail/other");
+        ok("phone reader returns to its list", true);
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${BASE}/mail/primary`, { waitUntil: "networkidle" });
 
     // dark mode
     await page.evaluate(() => {
@@ -597,9 +750,18 @@ async function main() {
       consoleErrors.length === 0,
       consoleErrors.slice(0, 5).join(" | "),
     );
+  } catch (error) {
+    await shot(page, "failure");
+    console.log("Browser errors:", consoleErrors.slice(0, 5));
+    throw error;
   } finally {
     await browser.close();
-    // cleanup
+    // Cleanup only resources created by this run, never pre-existing fixtures.
+    if (secondAccountId) await client.mutation(api.accounts.remove, { accountId: secondAccountId });
+    if (createdCategoryId) await client.mutation(api.categories.remove, { categoryId: createdCategoryId });
+    for (const key of await client.query(api.apiKeys.list, {})) {
+      if (key.name === `${TAG}-key`) await client.mutation(api.apiKeys.revoke, { apiKeyId: key._id });
+    }
     try {
       await client.mutation(api.accounts.remove, {
         accountId: accountId as never,
@@ -617,4 +779,7 @@ async function main() {
   }
 }
 
-void main();
+void main().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => {
+  // Also covers setup failures before the browser's try/finally begins.
+  await Promise.allSettled(cleanupTasks.map(cleanup => cleanup()));
+});

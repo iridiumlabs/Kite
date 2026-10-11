@@ -8,15 +8,20 @@ export function rewriteCidReferences(
   html: string,
   cidToDataUri: Map<string, string>,
 ): { html: string; replaced: number } {
+  // Parsers disagree on whether Content-ID keeps its angle brackets, so
+  // normalize both the map keys and the values we look up.
+  const normalized = new Map<string, string>();
+  for (const [k, v] of cidToDataUri) {
+    normalized.set(k.replace(/[<>]/g, ""), v);
+  }
   let replaced = 0;
   const out = html.replace(
     /(\bsrc|\bhref)\s*=\s*(["']?)cid:([^"'\s>]+)\2/gi,
     (whole, attr: string, quote: string, cid: string) => {
-      const decoded = decodeURIComponent(cid);
-      const uri =
-        cidToDataUri.get(decoded) ??
-        cidToDataUri.get(cid) ??
-        cidToDataUri.get(decoded.replace(/[<>]/g, ""));
+      let decoded = cid;
+      try { decoded = decodeURIComponent(cid); } catch { /* Malformed escapes are literal CIDs. */ }
+      decoded = decoded.replace(/[<>]/g, "");
+      const uri = normalized.get(decoded) ?? normalized.get(cid);
       if (!uri) return whole;
       replaced++;
       const q = quote || '"';

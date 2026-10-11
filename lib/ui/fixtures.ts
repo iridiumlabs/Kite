@@ -263,6 +263,13 @@ Maya`;
 export const FIXTURE_CONTENT: Record<string, MessageContent> = {
   "m-3": {
     text: MAYA_BODY,
+    html: MAYA_BODY.split("\n\n").map((paragraph, i, paragraphs) => {
+      const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      if (paragraph.startsWith("1. ")) {
+        return `<ol>${paragraph.split("\n").map(line => `<li>${escape(line.replace(/^\d+\. /, ""))}</li>`).join("")}</ol>`;
+      }
+      return `<p${paragraphs[i + 1]?.startsWith("1. ") ? ' style="margin-bottom:6px"' : ""}>${escape(paragraph)}</p>`;
+    }).join(""),
     attachments: [
       {
         id: "att-1",

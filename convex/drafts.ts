@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
@@ -28,6 +29,13 @@ const draftAttachmentV = v.union(
     size: v.number(),
   }),
 );
+
+async function validateAttachment(ctx: MutationCtx, userId: string, attachment: Doc<"drafts">["attachments"][number]) {
+  if (attachment.kind === "forward") {
+    const message = await ctx.db.get(attachment.messageId);
+    if (!message || message.userId !== userId || !message.attachments.some(a => a.id === attachment.attachmentId)) throw new Error("Attachment not found");
+  }
+}
 
 async function bumpDraftsCounter(
   ctx: MutationCtx,
@@ -62,6 +70,7 @@ async function ownedDraft(
 ): Promise<Doc<"drafts">> {
   const draft = await ctx.db.get(draftId);
   if (!draft || draft.userId !== userId) throw new Error("Draft not found");
+  if (draft.status === "sending") throw new Error("Draft is already sending");
   return draft;
 }
 
@@ -94,10 +103,7 @@ export const list = query({
   args: {
     ...apiKeyArg,
     accountId: v.optional(v.id("accounts")),
-    paginationOpts: v.object({
-      numItems: v.number(),
-      cursor: v.union(v.string(), v.null()),
-    }),
+    paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
@@ -109,26 +115,8 @@ export const list = query({
       return await ctx.db
         .query("drafts")
         .withIndex("by_account", (q) => q.eq("accountId", args.accountId!))
-        .collect()
-        .then((rows) => rows.sort((a, b) => b.updatedAt - a.updatedAt))
-        .then((rows) => {
-          // Account-scoped listing is bounded in practice; apply the same
-          // pagination contract client-side.
-          const start = args.paginationOpts.cursor
-            ? rows.findIndex((r) => r._id === args.paginationOpts.cursor) + 1
-            : 0;
-          const page = rows.slice(
-            Math.max(start, 0),
-            Math.max(start, 0) + args.paginationOpts.numItems,
-          );
-          const last = page[page.length - 1];
-          const done = start + page.length >= rows.length;
-          return {
-            page,
-            isDone: done,
-            continueCursor: done || !last ? "" : (last._id as string),
-          };
-        });
+        .order("desc")
+        .paginate(args.paginationOpts);
     }
     const result = await ctx.db
       .query("drafts")
@@ -177,6 +165,15 @@ export const create = mutation({
     if (!account || account.userId !== userId) {
       throw new Error("Account not found");
     }
+    if (args.threadId) {
+      const thread = await ctx.db.get(args.threadId);
+      if (!thread || thread.userId !== userId) throw new Error("Thread not found");
+    }
+    if (args.replyToMessageId) {
+      const message = await ctx.db.get(args.replyToMessageId);
+      if (!message || message.userId !== userId) throw new Error("Message not found");
+    }
+    for (const attachment of args.attachments ?? []) await validateAttachment(ctx, userId, attachment);
     const domain = account.email.split("@")[1] ?? "localhost";
     const now = Date.now();
     const draftId = await ctx.db.insert("drafts", {
@@ -209,6 +206,7 @@ export const update = mutation({
   args: {
     ...apiKeyArg,
     draftId: v.id("drafts"),
+    accountId: v.optional(v.id("accounts")),
     to: v.optional(v.array(addressV)),
     cc: v.optional(v.array(addressV)),
     bcc: v.optional(v.array(addressV)),
@@ -219,15 +217,26 @@ export const update = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
     const draft = await ownedDraft(ctx, userId, args.draftId);
-    const patch: Record<string, unknown> = {
-      remoteDirty: true,
-      updatedAt: Date.now(),
-    };
-    for (const key of ["to", "cc", "bcc", "subject", "html", "text"] as const) {
-      if (args[key] !== undefined) patch[key] = args[key];
+    const patch: Record<string, unknown> = {};
+    if (args.accountId && args.accountId !== draft.accountId) {
+      const account = await ctx.db.get(args.accountId);
+      if (!account || account.userId !== userId) throw new Error("Account not found");
+      if (draft.remoteUid !== undefined && draft.remoteFolderId) {
+        const folder = await ctx.db.get(draft.remoteFolderId);
+        if (folder) await enqueueOp(ctx, { userId, accountId: draft.accountId, kind: "deleteRemoteDraft", payload: { folderPath: folder.path, uid: draft.remoteUid } });
+      }
+      patch.accountId = args.accountId;
+      patch.remoteUid = undefined;
+      patch.remoteFolderId = undefined;
     }
+    for (const key of ["to", "cc", "bcc", "subject", "html", "text"] as const) {
+      if (args[key] !== undefined && JSON.stringify(args[key]) !== JSON.stringify(draft[key])) patch[key] = args[key];
+    }
+    if (Object.keys(patch).length === 0) return;
+    patch.remoteDirty = true;
+    patch.updatedAt = Date.now();
     await ctx.db.patch(args.draftId, patch);
-    await schedulePush(ctx, draft);
+    await schedulePush(ctx, (await ctx.db.get(args.draftId))!);
   },
 });
 
@@ -240,6 +249,7 @@ export const addAttachment = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
     const draft = await ownedDraft(ctx, userId, args.draftId);
+    await validateAttachment(ctx, userId, args.attachment);
     await ctx.db.patch(args.draftId, {
       attachments: [...draft.attachments, args.attachment],
       remoteDirty: true,

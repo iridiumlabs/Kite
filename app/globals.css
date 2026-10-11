@@ -104,6 +104,8 @@
   --color-search-field: var(--search-field);
   --color-kbd-bg: var(--kbd-bg);
   --color-menu-bg: var(--menu-bg);
+  --color-menu: var(--menu-bg);
+  --color-menu-ring: var(--menu-ring);
   --color-avatar: var(--avatar);
   --color-badge-bg: var(--badge-bg);
   --color-badge-text: var(--badge-text);
@@ -127,6 +129,20 @@ body {
 
 .tnum {
   font-feature-settings: "tnum";
+}
+
+/*
+  Layering scale:
+    app content         z-0
+    compose windows     z-40
+    drawer + backdrop   z-45 / z-46
+    popovers and menus  z-50
+    dialog backdrop     z-60, dialogs z-61
+    command palette     z-70
+    toasts              sonner default (topmost)
+*/
+.menu-shadow {
+  box-shadow: var(--shadow-menu);
 }
 
 /* Press feedback: instant on pointer-down */
@@ -304,6 +320,21 @@ body {
   padding-left: 20px;
   margin: 0 0 14px;
 }
+.ProseMirror ul {
+  list-style: disc;
+}
+.ProseMirror ol {
+  list-style: decimal;
+}
+.ProseMirror li + li {
+  margin-top: 6px;
+}
+.ProseMirror li p {
+  margin-bottom: 0;
+}
+.ProseMirror li::marker {
+  color: var(--text-tertiary);
+}
 .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
@@ -375,6 +406,15 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
   border-radius: 4px;
+}
+/* Floating surfaces and the palette input never show the container ring;
+   items keep their own focus-visible styling */
+.menu-popup:focus-visible,
+.popover-popup:focus-visible,
+.dialog-popup:focus-visible,
+[cmdk-input]:focus-visible,
+[cmdk-list]:focus-visible {
+  outline: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

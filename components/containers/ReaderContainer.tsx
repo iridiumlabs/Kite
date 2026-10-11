@@ -3,7 +3,7 @@
 import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Reader } from "@/components/mail/Reader";
 import {
@@ -25,6 +25,9 @@ import {
   markInflight,
   clearInflight,
   evictCached,
+  subscribeContent,
+  contentSnapshot,
+  serverContentSnapshot,
 } from "@/lib/ui/contentCache";
 import { ArrowLeft } from "lucide-react";
 
@@ -81,7 +84,7 @@ export function ReaderContainer({
 
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
-  const [contentVersion, setContentVersion] = useState(0);
+  const contentVersion = useSyncExternalStore(subscribeContent, contentSnapshot, serverContentSnapshot);
   const [, setRemoteLoaded] = useState(false);
   const [now] = useState(() => Date.now());
 
@@ -137,27 +140,47 @@ export function ReaderContainer({
     }
   }, [data, threadId, setRead]);
 
-  // load content for expanded messages (async fetch, cached in module LRU)
+  // load content for expanded messages (async fetch, cached in module LRU).
+  // Fetches are capped at ~20s: on timeout or failure the message renders an
+  // inline error with Retry instead of a permanent skeleton.
   useEffect(() => {
     for (const m of messages) {
       if (!expandedIds.has(m.id)) continue;
       if (getCached(m.id)) continue;
       if (!markInflight(m.id)) continue;
-      getContent({ messageId: m.id as Id<"messages"> })
+      let timer: ReturnType<typeof setTimeout>;
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("Timed out while loading this message.")),
+          20_000,
+        );
+      });
+      Promise.race([
+        getContent({ messageId: m.id as Id<"messages"> }),
+        timeout,
+      ])
         .then((res) => {
           setCached(m.id, res as MessageContent);
         })
-        .catch(() => {
-          setCached(m.id, {
-            text: "This message could not be loaded.",
-          });
+        .catch((e) => {
+          const msg =
+            e instanceof Error && /moved/i.test(e.message)
+              ? "This message moved. Refreshing the mailbox, try again shortly."
+              : e instanceof Error && /timed out/i.test(e.message)
+                ? e.message
+                : "This message could not be loaded.";
+          setCached(m.id, { error: msg });
         })
         .finally(() => {
+          clearTimeout(timer);
           clearInflight(m.id);
-          setContentVersion((v) => v + 1);
         });
     }
-  }, [expandedIds, messages, getContent]);
+  }, [expandedIds, messages, getContent, contentVersion]);
+
+  const onRetryContent = useCallback((id: string) => {
+    evictCached(id);
+  }, []);
 
   // prefetch latest message content of neighbors
   const idx = threads.findIndex((t) => t.id === threadId);
@@ -396,11 +419,12 @@ export function ReaderContainer({
       onReplyAll={onReplyAll}
       onForward={onForward}
       onDownloadAttachment={onDownloadAttachment}
+      onRetryContent={onRetryContent}
       onLoadRemote={() => {
         setRemoteLoaded(true);
         void updateSettings({ loadRemoteImages: true }).catch(() => {});
         for (const m of messages) evictCached(m.id);
-        setContentVersion((v) => v + 1);
+
       }}
       dark={dark}
       recipientSummary={(m) => {

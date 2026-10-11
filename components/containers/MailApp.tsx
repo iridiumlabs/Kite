@@ -40,6 +40,7 @@ import { ConnectAccountDialog } from "@/components/settings/ConnectAccountDialog
 import { CategoryDialog } from "@/components/settings/CategoryDialog";
 import { useMailShortcuts } from "@/lib/ui/useShortcuts";
 import { PanelLeft } from "lucide-react";
+import { Dialog } from "@base-ui/react/dialog";
 import { SignOutListener } from "@/components/SignOutListener";
 
 const THREAD_VIEWS = new Set([
@@ -98,7 +99,7 @@ function toAccountInfo(a: Doc<"accounts">, unread?: number): AccountInfo {
     status: a.status,
     lastError: a.lastError,
     unread,
-    syncing: !a.initialSyncDone,
+    syncing: (!a.initialSyncDone || a.status === "syncing") && a.status !== "error" && a.status !== "auth_error",
   };
 }
 
@@ -250,16 +251,22 @@ export function MailApp() {
 
   const threads: ThreadItem[] = useMemo(() => {
     if (view === "sent") {
-      return (sentQuery.results ?? []).map((m) => ({
-        id: m.threadId,
-        subject: m.subject,
-        participants: m.to.length ? m.to : [m.from],
-        snippet: m.snippet,
-        lastMessageAt: m.date,
-        messageCount: 1,
-        unread: false,
-        hasAttachments: m.hasAttachments,
-      }));
+      const sentThreads = new Map<string, ThreadItem>();
+      for (const m of sentQuery.results ?? []) {
+        const existing = sentThreads.get(m.threadId);
+        if (existing) {
+          existing.messageCount++;
+          existing.hasAttachments ||= m.hasAttachments;
+        } else {
+          sentThreads.set(m.threadId, {
+            id: m.threadId, subject: m.subject,
+            participants: m.to.length ? m.to : [m.from], snippet: m.snippet,
+            lastMessageAt: m.date, messageCount: 1, unread: false,
+            hasAttachments: m.hasAttachments,
+          });
+        }
+      }
+      return [...sentThreads.values()];
     }
     if (view === "drafts") {
       return (draftsQuery.results ?? []).map((d) => ({
@@ -302,14 +309,29 @@ export function MailApp() {
     : view === "sent"
       ? sentQuery.loadMore
       : draftsQuery.loadMore;
-  const olderRequested = useRef(false);
-  useEffect(() => {
-    if (listDone && !olderRequested.current && view !== "drafts") {
-      olderRequested.current = true;
-      void loadOlder({});
+  // Backfill only on demand and only for the current view. Pending folders
+  // mean older mail exists, not that a request is running.
+  const olderArgs = useMemo(() => ({
+    accountId: view === "account" ? viewId as Id<"accounts"> : undefined,
+    includeJunk: view === "other" || view === "category",
+    role: view === "sent" ? "sent" as const
+      : view === "archive" ? "archive" as const
+      : view === "trash" ? "trash" as const
+      : view === "account" || view === "starred" ? undefined : "inbox" as const,
+  }), [view, viewId]);
+  const backfill = useQuery(api.mail.backfillStatus, view === "drafts" ? "skip" : olderArgs);
+  const backfillPending = (backfill?.pending ?? 0) > 0;
+  const [olderInFlight, setOlderInFlight] = useState(false);
+  const requestOlder = async () => {
+    if (olderInFlight) return;
+    setOlderInFlight(true);
+    try {
+      const result = await loadOlder(olderArgs);
+      if (!result.scheduled) toast("Mailbox is busy. Try loading older mail again.");
     }
-    if (!listDone) olderRequested.current = false;
-  }, [listDone, loadOlder, view]);
+    catch { toast.error("Older mail could not be loaded. Try again."); }
+    finally { setOlderInFlight(false); }
+  };
 
   // window focus -> sync, throttled 60s
   const lastSync = useRef(0);
@@ -524,6 +546,8 @@ export function MailApp() {
         d: "drafts",
         a: "archive",
         t: "trash",
+        z: "snoozed",
+        "*": "starred",
       };
       if (map[key]) navigate(map[key]);
     },
@@ -588,16 +612,25 @@ export function MailApp() {
           ui.openCompose({ mode: "new" });
         },
       },
-      ...(["primary", "other", "sent", "drafts", "archive", "trash"] as const).map(
-        (v) => ({
-          id: `go-${v}`,
-          label: `Go to ${VIEW_LABELS[v]}`,
-          onSelect: () => {
-            ui.setPaletteOpen(false);
-            navigate(v);
-          },
-        }),
-      ),
+      ...(
+        [
+          "primary",
+          "other",
+          "sent",
+          "drafts",
+          "archive",
+          "trash",
+          "snoozed",
+          "starred",
+        ] as const
+      ).map((v) => ({
+        id: `go-${v}`,
+        label: `Go to ${VIEW_LABELS[v]}`,
+        onSelect: () => {
+          ui.setPaletteOpen(false);
+          navigate(v);
+        },
+      })),
       ...categoryInfos.map((c) => ({
         id: `go-cat-${c.id}`,
         label: `Go to ${c.name}`,
@@ -796,11 +829,13 @@ export function MailApp() {
     </div>
   );
 
-  const listFooter = listDone ? (
-    <div className="py-3 text-center text-tertiary text-xs/4">
-      Loading older mail…
-    </div>
-  ) : threads.length >= 50 ? (
+  const listFooter =
+    listDone && (olderInFlight || backfillPending) ? (
+      <button disabled={olderInFlight} onClick={() => void requestOlder()}
+        className="py-3 text-center text-tertiary text-xs/4 disabled:cursor-wait">
+        {olderInFlight ? "Loading older mail…" : "Load older mail"}
+      </button>
+    ) : !listDone && !listLoading ? (
     <button
       className="py-3 text-center text-tertiary text-xs/4"
       onClick={() => loadMore(50)}
@@ -811,12 +846,12 @@ export function MailApp() {
 
   // layout branches
   const showSidebarOverlay = isNarrow && !isMobile;
-  const wideLayout = !threadId || isMobile;
+  const wideLayout = !threadId && !isMobile;
 
   const listPane = (
     <div
       className={
-        wideLayout
+        wideLayout || isMobile
           ? "flex flex-col grow basis-0 h-full min-w-0 bg-app"
           : "flex flex-col w-95 h-full shrink-0 bg-app border-r border-sidebar-border"
       }
@@ -827,6 +862,7 @@ export function MailApp() {
         wide={wideLayout}
         filter={ui.filter}
         onFilterChange={ui.setFilter}
+        onGoView={(v) => navigate(v)}
         onOpenSearch={() => ui.setPaletteOpen(true)}
         extra={
           showSidebarOverlay || isMobile ? (
@@ -861,7 +897,10 @@ export function MailApp() {
         {loading || listLoading ? (
           loadingRows
         ) : threads.length === 0 ? (
-          emptyState
+          <div className="flex flex-col">
+            {emptyState}
+            {listFooter}
+          </div>
         ) : (
           <ThreadList
             threads={threads}
@@ -882,16 +921,16 @@ export function MailApp() {
       {!DEV_AUTH && <SignOutListener />}
       {/* Sidebar: fixed at >=1100, overlay drawer below */}
       {!isNarrow && sidebarEl}
-      {isNarrow && ui.sidebarOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/20 dialog-backdrop"
-            onClick={() => ui.setSidebarOpen(false)}
-          />
-          <div className="fixed inset-y-0 left-0 z-50 dialog-popup">
-            {sidebarEl}
-          </div>
-        </>
+      {isNarrow && (
+        <Dialog.Root open={ui.sidebarOpen} onOpenChange={ui.setSidebarOpen}>
+          <Dialog.Portal>
+            <Dialog.Backdrop className="fixed inset-0 z-45 bg-black/20 dialog-backdrop" />
+            <Dialog.Popup className="fixed inset-y-0 left-0 z-46 dialog-popup">
+              <Dialog.Title className="sr-only">Mailboxes</Dialog.Title>
+              {sidebarEl}
+            </Dialog.Popup>
+          </Dialog.Portal>
+        </Dialog.Root>
       )}
 
       {/* Content */}

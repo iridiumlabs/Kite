@@ -5,6 +5,7 @@ import {
   MutationCtx,
 } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { ingestMessage } from "./model/ingest";
 import { recomputeThread } from "./model/threads";
 import { addressV } from "./validators";
@@ -51,6 +52,7 @@ const ingestMessageV = v.object({
     ),
   ),
   needsClassification: v.optional(v.boolean()),
+  classificationCategories: v.optional(v.array(v.object({ id: v.id("categories"), name: v.string(), description: v.string() }))),
   classifyAttempts: v.optional(v.number()),
   bulk: v.optional(v.boolean()),
   postDraftId: v.optional(v.string()),
@@ -101,16 +103,15 @@ export const getSecret = internalQuery({
 });
 
 export const dueSyncAccounts = internalQuery({
-  args: { now: v.number() },
+  args: { now: v.number(), cursor: v.optional(v.union(v.string(), v.null())) },
   handler: async (ctx, args) => {
-    const all = await ctx.db.query("accounts").collect();
-    return all
-      .filter(
-        (a) =>
-          a.status !== "auth_error" &&
-          (a.nextSyncAfter === undefined || a.nextSyncAfter <= args.now),
-      )
-      .map((a) => a._id);
+    const page = await ctx.db.query("accounts").paginate({ numItems: 100, cursor: args.cursor ?? null });
+    return {
+      ids: page.page.filter(a => a.status !== "auth_error" &&
+        (a.nextSyncAfter === undefined || a.nextSyncAfter <= args.now)).map(a => a._id),
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
+    };
   },
 });
 
@@ -144,7 +145,7 @@ export const dueOps = internalQuery({
       .withIndex("by_account_next", (q) =>
         q.eq("accountId", args.accountId).lte("nextAttemptAt", args.now),
       )
-      .collect();
+      .take(100);
   },
 });
 
@@ -335,12 +336,13 @@ export const draftsForAccount = internalQuery({
 export const needsClassification = internalQuery({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const rows = await ctx.db
-      .query("messages")
-      .withIndex("by_needs_classification", (q) =>
-        q.eq("needsClassification", true).lt("classifyAttempts", 3),
-      )
-      .take(args.limit ?? 40);
+    const rows: Doc<"messages">[] = [];
+    const limit = Math.min(args.limit ?? 40, 40);
+    for (const role of ["inbox", "junk"] as const) {
+      rows.push(...await ctx.db.query("messages")
+        .withIndex("by_needs_classification", q => q.eq("needsClassification", true).eq("folderRole", role).lt("classifyAttempts", 3))
+        .take(Math.max(0, limit - rows.length)));
+    }
     const out = [];
     for (const m of rows) {
       if (m.classifiedBy !== "heuristic") continue;
@@ -356,6 +358,7 @@ export const needsClassification = internalQuery({
         folderRole: m.folderRole,
         uid: m.uid,
         classifyAttempts: m.classifyAttempts,
+        classificationCategories: m.classificationCategories ?? [],
       });
     }
     return out;
@@ -731,7 +734,9 @@ export const updateAccountSync = internalMutation({
 export const accountsWithDueOps = internalQuery({
   args: { now: v.number() },
   handler: async (ctx, args) => {
-    const ops = await ctx.db.query("pendingOps").collect();
+    const ops = await ctx.db.query("pendingOps")
+      .withIndex("by_next", q => q.lte("nextAttemptAt", args.now))
+      .take(100);
     const ids = new Set<Id<"accounts">>();
     for (const op of ops) {
       if (op.nextAttemptAt <= args.now) ids.add(op.accountId);
@@ -805,16 +810,22 @@ export const markDraftPushed = internalMutation({
     folderId: v.optional(v.id("folders")),
     uid: v.optional(v.number()),
     prevRemoteUid: v.optional(v.number()),
+    pushedUpdatedAt: v.optional(v.number()),
+    pushedAccountId: v.optional(v.id("accounts")),
   },
   handler: async (ctx, args) => {
     const draft = await ctx.db.get(args.draftId);
-    if (!draft) return null;
+    if (!draft || (args.pushedAccountId && draft.accountId !== args.pushedAccountId)) return null;
+    const changedDuringPush = args.pushedUpdatedAt !== undefined && draft.updatedAt !== args.pushedUpdatedAt;
     await ctx.db.patch(args.draftId, {
       remoteFolderId: args.folderId,
       remoteUid: args.uid,
-      remoteDirty: false,
-      pushScheduledAt: undefined,
+      remoteDirty: changedDuringPush,
+      pushScheduledAt: changedDuringPush ? Date.now() + 30_000 : undefined,
     });
+    if (changedDuringPush) {
+      await ctx.scheduler.runAfter(30_000, internal.node.draftsOps.pushDraftNow, { draftId: draft._id });
+    }
     return { prevRemoteUid: draft.remoteUid };
   },
 });
@@ -977,10 +988,22 @@ export const applyClassification = internalMutation({
     const touched = new Set<Id<"threads">>();
     for (const u of args.updates) {
       const m = await ctx.db.get(u.messageId);
-      if (!m) continue;
+      if (!m || !m.needsClassification || m.classifiedBy !== "heuristic") continue;
+      const thread = await ctx.db.get(m.threadId);
+      if (!thread || thread.inboxManual) continue;
+      if (u.needsClassification) {
+        await ctx.db.patch(m._id, { classifyAttempts: u.classifyAttempts });
+        continue;
+      }
+      const categories = [];
+      for (const id of u.categoryIds) {
+        const category = await ctx.db.get(id);
+        if (category?.userId === m.userId) categories.push(id);
+      }
       await ctx.db.patch(u.messageId, {
         inbox: u.inbox ?? m.inbox,
-        categoryIds: u.categoryIds,
+        categoryIds: categories,
+        classificationCategories: undefined,
         classifiedBy: u.classifiedBy,
         needsClassification: u.needsClassification,
         classifyAttempts: u.classifyAttempts,

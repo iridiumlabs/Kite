@@ -118,7 +118,13 @@ flags in production.
   (unit tested); `convex/node/` "use node" actions (IMAP, SMTP, crypto, content).
 
 ## Commands
-(Filled in as the project is scaffolded.)
+- `npm run dev` and `npm run convex:dev`: frontend and backend development.
+- `npm run typecheck`, `npm run lint`, `npm test -- --maxWorkers=4`, `npm run build`: local verification.
+- `npx tsx scripts/screenshots.ts`: Paper comparison captures, requires Next dev.
+- `npx tsx scripts/live-ui-e2e.ts`: real browser and Ethereal IMAP/SMTP coverage, requires local Convex and dev auth.
+- `npx tsx scripts/live-e2e.ts`: wire-level Ethereal integration coverage, local Convex only.
+- Set `POST_MCP_URL=http://localhost:3000` and run `npx tsx scripts/live-mcp.ts` to verify the remote MCP tools against a running dev server.
+- Live suites use separate test owners. Never run them against a production deployment.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

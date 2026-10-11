@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useMediaQuery } from "@/lib/ui/useMediaQuery";
 import { Sidebar } from "@/components/mail/Sidebar";
-import { ListHeader } from "@/components/mail/ListHeader";
+import { ListHeader as MailListHeader } from "@/components/mail/ListHeader";
 import { ThreadList } from "@/components/mail/ThreadList";
 import { Reader } from "@/components/mail/Reader";
 import {
@@ -14,7 +15,7 @@ import {
   useComposeEditor,
   ComposeEditorArea,
 } from "@/components/compose/Editor";
-import { Tag, Clock, Mail, ChevronsUpDown } from "@/components/icons";
+import { Tag, Clock, MoreDots, ChevronsUpDown } from "@/components/icons";
 import {
   FIXTURE_ACCOUNTS,
   FIXTURE_CATEGORIES,
@@ -25,6 +26,11 @@ import {
 } from "@/lib/ui/fixtures";
 
 const noop = () => {};
+
+function ListHeader(props: React.ComponentProps<typeof MailListHeader>) {
+  const mobile = useMediaQuery("(max-width: 767px)");
+  return <MailListHeader {...props} wide={props.wide && !mobile} />;
+}
 
 function useDarkParam() {
   const params = useSearchParams();
@@ -103,7 +109,7 @@ function PreviewReader({ dark }: { dark: boolean }) {
       onStar={noop}
       onMore={
         <ToolbarIcon>
-          <Mail />
+          <MoreDots />
         </ToolbarIcon>
       }
       onPrevThread={noop}
@@ -130,7 +136,7 @@ const COMPOSE_BODY = `<p>Hi Lena,</p>
 <p>I've attached her notes so you have the full context. Happy to pair on the label mapping if it gets hairy.</p>
 <p>Thanks, Arham</p>`;
 
-function PreviewCompose() {
+function PreviewCompose({ mobile = false }: { mobile?: boolean }) {
   const editor = useComposeEditor({ initialHtml: COMPOSE_BODY });
   const to: RecipientChip[] = [
     { name: "Lena Fischer", email: "lena@fischer.design" },
@@ -140,6 +146,7 @@ function PreviewCompose() {
   ];
   return (
     <ComposeWindow
+      mobile={mobile}
       subject="Thursday walkthrough: import flow fixes"
       status="saved"
       fromLabel={
@@ -192,8 +199,9 @@ export function PreviewApp() {
   const params = useSearchParams();
   const dark = useDarkParam();
   const frame = params.get("frame") ?? "inbox-selected";
+  const isMobile = useMediaQuery("(max-width: 767px)");
 
-  const sidebar = <PreviewSidebar profileOpen={frame === "profile"} />;
+  const sidebar = <div className="max-[1099px]:hidden shrink-0"><PreviewSidebar profileOpen={frame === "profile"} /></div>;
 
   if (frame === "empty") {
     return (
@@ -269,15 +277,15 @@ export function PreviewApp() {
           <div className="flex-1 overflow-y-auto">
             <ThreadList
               threads={FIXTURE_THREADS}
-              layout="wide"
+              layout={isMobile ? "compact" : "wide"}
               onOpen={noop}
               actions={rowActions}
             />
           </div>
         </div>
         {frame === "compose" && (
-          <div className="absolute right-4 bottom-4">
-            <PreviewCompose />
+          <div className={isMobile ? "absolute inset-0" : "absolute right-6 bottom-6"}>
+            <PreviewCompose mobile={isMobile} />
           </div>
         )}
       </div>
@@ -288,7 +296,7 @@ export function PreviewApp() {
   return (
     <div className="flex h-dvh w-full overflow-clip bg-app antialiased">
       {sidebar}
-      <div className="flex flex-col w-95 h-full shrink-0 bg-app border-r border-sidebar-border">
+      <div className="flex flex-col w-95 h-full shrink-0 bg-app border-r border-sidebar-border max-[767px]:hidden">
         <ListHeader
           title="Primary"
           unread={12}

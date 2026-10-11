@@ -146,10 +146,11 @@ export const getMessageContent = internalAction({
         if (inlineTotal + att.content.length > INLINE_CID_MAX) continue;
         inlineTotal += att.content.length;
         const b64 = Buffer.from(att.content).toString("base64");
-        cidMap.set(
-          att.cid,
-          `data:${att.contentType};base64,${b64}`,
-        );
+        const uri = `data:${att.contentType};base64,${b64}`;
+        cidMap.set(att.cid, uri);
+        // mailparser keeps Content-ID angle brackets on some inputs;
+        // store a normalized key too so the rewrite always matches.
+        cidMap.set(att.cid.replace(/[<>]/g, ""), uri);
       }
 
       let html = parsed.html ? sanitizeEmailHtml(parsed.html) : undefined;

@@ -340,6 +340,7 @@ export const moveToInbox = mutation({
           patch.inbox = args.inbox;
           patch.classifiedBy = "manual";
           patch.needsClassification = false;
+          patch.classificationCategories = undefined;
         }
         if (m.folderRole === "junk") {
           if (inboxFolder === null) {
@@ -409,6 +410,8 @@ export const assignCategories = mutation({
             await ctx.db.patch(latest._id, {
               categoryIds: merged,
               classifiedBy: "manual",
+              needsClassification: false,
+              classificationCategories: undefined,
             });
           }
         }
@@ -417,8 +420,8 @@ export const assignCategories = mutation({
         const drop = new Set<string>(args.remove);
         for (const m of msgs) {
           const kept = m.categoryIds.filter((id) => !drop.has(id));
-          if (kept.length !== m.categoryIds.length) {
-            await ctx.db.patch(m._id, { categoryIds: kept });
+          if (kept.length !== m.categoryIds.length || m.needsClassification) {
+            await ctx.db.patch(m._id, { categoryIds: kept, classifiedBy: "manual", needsClassification: false, classificationCategories: undefined });
           }
         }
       }
@@ -557,7 +560,9 @@ export const listThreads = query({
         await Promise.all(rows.page.map((r) => ctx.db.get(r.threadId)))
       ).filter((t): t is Doc<"threads"> => t !== null);
       return {
-        page: await enrichThreads(ctx, userId, threads),
+        page: await enrichThreads(ctx, userId, threads.filter(t =>
+          (!filter?.unread || t.unread) && (!filter?.starred || t.starred) &&
+          (!filter?.hasAttachments || t.hasAttachments))),
         continueCursor: rows.continueCursor,
         isDone: rows.isDone,
       };
@@ -950,6 +955,7 @@ export const loadOlder = action({
     ...apiKeyArg,
     accountId: v.optional(v.id("accounts")),
     role: v.optional(folderRoleArg),
+    includeJunk: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<{ scheduled: number }> => {
     const userId = await requireUserId(ctx, args.apiKey);
@@ -962,14 +968,41 @@ export const loadOlder = action({
     let scheduled = 0;
     for (const account of accounts) {
       if (!account) continue;
-      await ctx.scheduler.runAfter(
-        0,
-        internal.node.sync.loadOlderInternal,
-        { accountId: account._id, role: args.role },
+      const result = await ctx.runAction(internal.node.sync.loadOlderInternal,
+        { accountId: account._id, role: args.role, includeJunk: args.includeJunk },
       );
-      scheduled++;
+      if (!("skipped" in result)) scheduled++;
     }
     return { scheduled };
+  },
+});
+
+// Whether the user's folders have finished IMAP backfill; the list footer
+// uses this to stop the "Loading older mail" hint once there is nothing left.
+export const backfillStatus = query({
+  args: { ...apiKeyArg, accountId: v.optional(v.id("accounts")), role: v.optional(folderRoleArg), includeJunk: v.optional(v.boolean()) },
+  handler: async (ctx, args): Promise<{ total: number; pending: number }> => {
+    const userId = await requireUserId(ctx, args.apiKey);
+    const accounts = await ctx.db
+      .query("accounts")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    let total = 0;
+    let pending = 0;
+    for (const account of accounts) {
+      if (args.accountId && args.accountId !== account._id) continue;
+      if (account.status === "auth_error" || !account.initialSyncDone) continue;
+      const folders = await ctx.db
+        .query("folders")
+        .withIndex("by_account", (q) => q.eq("accountId", account._id))
+        .collect();
+      for (const f of folders) {
+        if (args.role && args.role !== f.role && !(args.includeJunk && f.role === "junk")) continue;
+        total++;
+        if (!f.backfillDone) pending++;
+      }
+    }
+    return { total, pending };
   },
 });
 

@@ -4,6 +4,10 @@ import {
   blockRemoteImages,
 } from "../../convex/lib/html";
 
+test("malformed percent-escaped CID references do not break the entire message", () => {
+  expect(rewriteCidReferences('<img src="cid:bad%zz">', new Map())).toEqual({ html: '<img src="cid:bad%zz">', replaced: 0 });
+});
+
 describe("rewriteCidReferences", () => {
   const map = new Map([["img1@x", "data:image/png;base64,AAA"]]);
 
@@ -25,6 +29,19 @@ describe("rewriteCidReferences", () => {
     const r = rewriteCidReferences('<img src="cid:other">', map);
     expect(r.replaced).toBe(0);
     expect(r.html).toContain("cid:other");
+  });
+
+  test("matches map keys that kept their angle brackets", () => {
+    const m = new Map([["<px@e2e>", "data:x"]]);
+    const r = rewriteCidReferences('<img src="cid:px@e2e">', m);
+    expect(r.replaced).toBe(1);
+    expect(r.html).toContain('src="data:x"');
+  });
+
+  test("matches bracketed key and bracketed reference together", () => {
+    const m = new Map([["<px@e2e>", "data:x"]]);
+    const r = rewriteCidReferences('<img src="cid:%3Cpx@e2e%3E">', m);
+    expect(r.replaced).toBe(1);
   });
 
   test("matches cid values with angle brackets stripped", () => {

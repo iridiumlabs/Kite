@@ -64,11 +64,29 @@ async function buildDraftSource(
 export const pushDraftNow = internalAction({
   args: { draftId: v.id("drafts") },
   handler: async (ctx, args): Promise<{ uid: number | undefined }> => {
+    const draft = await ctx.runQuery(internal.syncStore.draftById, args);
+    if (!draft || !draft.remoteDirty) return { uid: draft?.remoteUid };
+    const owner = crypto.randomUUID();
+    try {
+      await ctx.runMutation(internal.syncStore.acquireLease, { accountId: draft.accountId, owner, ttlMs: 240_000 });
+    } catch {
+      await ctx.scheduler.runAfter(30_000, internal.node.draftsOps.pushDraftNow, args);
+      return { uid: draft.remoteUid };
+    }
+    try { return await ctx.runAction(internal.node.draftsOps.pushDraftUnderLease, args); }
+    finally { await ctx.runMutation(internal.syncStore.releaseLease, { accountId: draft.accountId, owner }); }
+  },
+});
+
+// Also called by the sync engine, which already owns the account lease.
+export const pushDraftUnderLease = internalAction({
+  args: { draftId: v.id("drafts") },
+  handler: async (ctx, args): Promise<{ uid: number | undefined }> => {
     const draft: Doc<"drafts"> | null = await ctx.runQuery(
       internal.syncStore.draftById,
       { draftId: args.draftId },
     );
-    if (!draft) return { uid: undefined };
+    if (!draft || !draft.remoteDirty) return { uid: draft?.remoteUid };
     const account: Doc<"accounts"> | null = await ctx.runQuery(
       internal.syncStore.getAccountDoc,
       { accountId: draft.accountId },
@@ -101,11 +119,18 @@ export const pushDraftNow = internalAction({
         path: draftsPath,
         role: "drafts",
       });
-      await ctx.runMutation(internal.syncStore.markDraftPushed, {
+      const recorded = await ctx.runMutation(internal.syncStore.markDraftPushed, {
         draftId: args.draftId,
         folderId,
         uid,
+        pushedUpdatedAt: draft.updatedAt,
+        pushedAccountId: draft.accountId,
       });
+      if (!recorded && uid !== undefined) {
+        // The draft was sent or discarded while APPEND was in flight.
+        await port.expunge(draftsPath, [uid], true);
+        return { uid: undefined };
+      }
       if (prevUid !== undefined && prevUid !== uid) {
         try {
           await port.expunge(draftsPath, [prevUid], true);

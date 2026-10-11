@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ComposeWindow,
+  QuotedPreview,
   type ComposeAttachment,
   type RecipientChip,
 } from "@/components/compose/ComposeWindow";
@@ -42,8 +43,14 @@ import {
   Clock,
 } from "lucide-react";
 import { ChevronsUpDown } from "@/components/icons";
+import { getCached } from "@/lib/ui/contentCache";
+import { replyRecipients, replySubjectFor, forwardSubjectFor, htmlToText } from "@/convex/lib/compose";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function stripHtml(html: string): string | undefined {
+  return htmlToText(html) || undefined;
+}
 
 function toChip(a: AddressInfo): RecipientChip {
   return { email: a.email, name: a.name };
@@ -235,7 +242,7 @@ function SchedulePopover({ onSchedule }: { onSchedule: (at: number) => void }) {
         <Clock size={16} strokeWidth={1.8} />
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Positioner side="top" align="start" sideOffset={8}>
+        <Popover.Positioner side="top" align="start" sideOffset={8} className="z-50">
           <Popover.Popup className="popover-popup w-64 rounded-[10px] bg-menu p-1.5 menu-shadow ring-1 ring-menu-ring">
             {presets.map((pr) => (
               <button
@@ -307,6 +314,7 @@ function ComposePane({
   const removeAttachment = useMutation(api.drafts.removeAttachment);
   const discardDraft = useMutation(api.drafts.discard);
   const scheduleSend = useMutation(api.drafts.scheduleSend);
+  const cancelSchedule = useMutation(api.drafts.cancelScheduledSend);
   const genUploadUrl = useMutation(api.drafts.generateUploadUrl);
   const sendDraftAction = useAction(api.send.sendDraft);
   const getContent = useAction(api.content.getMessageContent);
@@ -332,6 +340,8 @@ function ComposePane({
     win.mode === "draft" ? (win.draftId as Id<"drafts">) : undefined,
   );
   const dirtyRef = useRef(false);
+  const savingRef = useRef<Promise<Id<"drafts"> | undefined> | null>(null);
+  const saveLatestRef = useRef<(() => Promise<Id<"drafts"> | undefined>) | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const htmlRef = useRef("");
   const textRef = useRef("");
@@ -379,36 +389,26 @@ function ComposePane({
     } else if (win.replyToMessageId && replyTo) {
       const orig = replyTo;
       setAccountId(orig.accountId);
-      const selfEmail = accounts.find(
-        (a) => a.id === orig.accountId,
-      )?.email;
-      const target =
-        orig.replyTo && orig.replyTo.length > 0 ? orig.replyTo[0] : orig.from;
+      const recipients = replyRecipients(orig, win.mode === "replyAll", accounts.map(a => a.email));
       if (win.mode === "forward") {
-        setSubject(
-          orig.subject.startsWith("Fwd:")
-            ? orig.subject
-            : `Fwd: ${orig.subject}`,
-        );
+        setSubject(forwardSubjectFor(orig));
       } else {
-        setTo([toChip(target)]);
-        if (win.mode === "replyAll") {
-          const others = [...orig.to, ...orig.cc].filter(
-            (a) => a.email.toLowerCase() !== selfEmail?.toLowerCase(),
-          );
-          if (others.length) {
-            setCc(others.map(toChip));
-            setShowCc(true);
-          }
-        }
-        setSubject(
-          orig.subject.startsWith("Re:")
-            ? orig.subject
-            : `Re: ${orig.subject}`,
-        );
+        setTo(recipients.to.map(toChip));
+        setCc(recipients.cc.map(toChip));
+        setShowCc(recipients.cc.length > 0);
+        setSubject(replySubjectFor(orig));
       }
     }
   }
+
+  // quoted-text preview for replies/forwards: the send action appends the
+  // original server-side, so the composer only shows a collapsed preview.
+  const [quoteText, setQuoteText] = useState<string | undefined>();
+  const quoteFetchedRef = useRef(false);
+  const quoteSourceId = (win.replyToMessageId ??
+    (win.mode === "draft"
+      ? (existingDraft?.replyToMessageId as string | undefined)
+      : undefined)) as string | undefined;
 
   // forward mode: copy the original attachments into the draft once
   const forwardedRef = useRef(false);
@@ -425,7 +425,14 @@ function ComposePane({
       messageId: win.replyToMessageId as Id<"messages">,
     })
       .then((c) => {
-        const content = c as { attachments?: AttachmentInfo[] };
+        const content = c as {
+          attachments?: AttachmentInfo[];
+          text?: string;
+          html?: string;
+        };
+        setQuoteText(
+          content.text ?? stripHtml(content.html ?? "") ?? undefined,
+        );
         const atts = content.attachments ?? [];
         forwardAttsRef.current = atts;
         setAttachments((prev) => [
@@ -440,7 +447,28 @@ function ComposePane({
       .catch(() => {});
   }, [win, getContent]);
 
+  const wantsQuote =
+    win.mode === "reply" ||
+    win.mode === "replyAll" ||
+    (win.mode === "draft" && quoteSourceId !== undefined);
+  useEffect(() => {
+    if (quoteFetchedRef.current || !wantsQuote || !quoteSourceId) return;
+    quoteFetchedRef.current = true;
+    const cached = getCached(quoteSourceId);
+    void (cached && !cached.error ? Promise.resolve(cached) : getContent({ messageId: quoteSourceId as Id<"messages"> }))
+      .then((c) => {
+        const content = c as { text?: string; html?: string };
+        setQuoteText(
+          content.text ?? stripHtml(content.html ?? "") ?? undefined,
+        );
+      })
+      .catch(() => {});
+  }, [wantsQuote, quoteSourceId, getContent]);
+
   const save = useCallback(async (): Promise<Id<"drafts"> | undefined> => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    while (savingRef.current) await savingRef.current;
+    const operation = async (): Promise<Id<"drafts"> | undefined> => {
     const acct =
       (accountId as Id<"accounts"> | undefined) ??
       (accounts[0]?.id as Id<"accounts"> | undefined);
@@ -481,6 +509,7 @@ function ComposePane({
       } else {
         await updateDraft({
           draftId: draftIdRef.current,
+          accountId: acct,
           to: to.map(({ email, name }) => ({ email, name })),
           cc: cc.map(({ email, name }) => ({ email, name })),
           bcc: bcc.map(({ email, name }) => ({ email, name })),
@@ -496,13 +525,21 @@ function ComposePane({
       setStatus("error");
       return undefined;
     }
+    };
+    const promise = operation();
+    savingRef.current = promise;
+    try { return await promise; }
+    finally { savingRef.current = null; }
   }, [accountId, accounts, createDraft, updateDraft, to, cc, bcc, subject, win, ui]);
+
+  useEffect(() => { saveLatestRef.current = save; }, [save]);
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
   const queueSave = useCallback(() => {
     dirtyRef.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => void save(), 800);
-  }, [save]);
+    saveTimer.current = setTimeout(() => void saveLatestRef.current?.(), 800);
+  }, []);
 
   const editor = useComposeEditor({
     initialHtml: "",
@@ -534,8 +571,9 @@ function ComposePane({
       toast.error("Connect an account before attaching files");
       return;
     }
+    let nextIndex = attachments.length;
     for (const file of Array.from(files)) {
-      const idx = attachments.length;
+      const idx = nextIndex++;
       setAttachments((prev) => [
         ...prev,
         {
@@ -572,6 +610,7 @@ function ComposePane({
         );
       } catch {
         setAttachments((prev) => prev.filter((_, i) => i !== idx));
+        nextIndex--;
         toast.error(`Could not attach ${file.name}`);
       }
     }
@@ -580,6 +619,10 @@ function ComposePane({
   const onSend = async () => {
     if (to.length === 0) {
       toast.error("Add a recipient first");
+      return;
+    }
+    if (attachments.some(a => a.uploading)) {
+      toast.error("Wait for attachments to finish uploading");
       return;
     }
     if (to.some((c) => c.invalid)) {
@@ -649,6 +692,8 @@ function ComposePane({
   };
 
   const onDiscard = async () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    while (savingRef.current) await savingRef.current;
     ui.closeCompose(win.id);
     if (draftIdRef.current) {
       try {
@@ -681,6 +726,12 @@ function ComposePane({
 
   // Cmd+Enter to send
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape" && !e.defaultPrevented) {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
       void onSend();
@@ -704,7 +755,7 @@ function ComposePane({
               <ChevronsUpDown className="text-tertiary shrink-0" />
             </Menu.Trigger>
             <Menu.Portal>
-              <Menu.Positioner side="bottom" align="start" sideOffset={6}>
+              <Menu.Positioner side="bottom" align="start" sideOffset={6} className="z-50">
                 <Menu.Popup className="popover-popup w-64 rounded-[10px] bg-menu p-1 menu-shadow ring-1 ring-menu-ring">
                   {accounts.map((a) => (
                     <Menu.Item
@@ -803,6 +854,7 @@ function ComposePane({
           />
         }
         editor={<ComposeEditorArea editor={editor} />}
+        quoted={quoteText ? <QuotedPreview text={quoteText} /> : undefined}
         attachments={attachments}
         onRemoveAttachment={async (i) => {
           setAttachments((prev) => prev.filter((_, j) => j !== i));
@@ -820,7 +872,17 @@ function ComposePane({
         onSend={() => void onSend()}
         onAttach={() => fileInput.current?.click()}
         onInsertLink={onInsertLink}
-        onSchedule={<SchedulePopover onSchedule={(at) => void onSchedule(at)} />}
+        onSchedule={status === "scheduled" ? (
+          <button className="pressable text-accent text-xs px-2" onClick={async () => {
+            if (!draftIdRef.current) return;
+            try {
+              await cancelSchedule({ draftId: draftIdRef.current });
+              setStatus("saved");
+              setScheduledLabel(undefined);
+              toast("Scheduled send cancelled");
+            } catch { toast.error("Could not cancel scheduled send"); }
+          }}>Cancel schedule</button>
+        ) : <SchedulePopover onSchedule={(at) => void onSchedule(at)} />}
         onToggleFormat={() => setFormatOpen((v) => !v)}
         formatOpen={formatOpen}
         onDiscard={() => void onDiscard()}
@@ -841,25 +903,29 @@ function ComposePane({
 
   if (win.minimized) {
     return (
-      <motion.button
+      <motion.div
         layout
-        onClick={() => ui.restoreCompose(win.id)}
-        className="pressable flex items-center w-70 h-9 px-3 rounded-t-lg bg-menu ring-1 ring-menu-ring menu-shadow gap-2"
+        className="pressable flex items-center w-70 h-9 rounded-t-lg bg-menu ring-1 ring-menu-ring menu-shadow"
       >
-        <span className="grow text-left font-semibold text-primary text-[13px]/4 truncate">
-          {subject || "New message"}
-        </span>
+        <button
+          onClick={() => ui.restoreCompose(win.id)}
+          className="flex items-center grow h-full px-3 min-w-0 text-left"
+        >
+          <span className="grow font-semibold text-primary text-[13px]/4 truncate">
+            {subject || "New message"}
+          </span>
+        </button>
         <button
           aria-label="Close draft"
           onClick={(e) => {
             e.stopPropagation();
             onClose();
           }}
-          className="icon-btn size-5 text-tertiary"
+          className="icon-btn size-5 mr-2.5 text-tertiary"
         >
           ×
         </button>
-      </motion.button>
+      </motion.div>
     );
   }
 
@@ -885,7 +951,7 @@ export function ComposeLayer({
     const w = visible[visible.length - 1] ?? minimized[minimized.length - 1];
     if (!w) return null;
     return (
-      <div className="fixed inset-0 z-50 bg-app">
+      <div className="fixed inset-0 z-40 bg-app">
         <div className="h-full [&_div[role=dialog]]:w-full [&_div[role=dialog]]:h-full [&_div[role=dialog]]:rounded-none [&_div[role=dialog]]:shadow-none">
           <ComposePane
             win={w}
@@ -898,7 +964,7 @@ export function ComposeLayer({
   }
 
   return (
-    <div className="fixed bottom-0 right-4 z-50 flex items-end gap-3 pointer-events-none">
+    <div className="fixed bottom-6 right-6 z-40 flex items-end gap-3 pointer-events-none">
       <AnimatePresence>
         {compose.map((w) => (
           <motion.div

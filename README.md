@@ -1,0 +1,41 @@
+# Post
+
+An Apple-inspired personal email client for multiple Spacemail IMAP/SMTP mailboxes. Built with Next.js 16, Clerk, Convex and Jev, with the same backend functions exposed through a remote MCP server.
+
+## Development
+
+1. Install dependencies with `npm ci`.
+2. Configure `.env.local` using `.env.example`.
+3. Run `npm run convex:dev` and `npm run dev` in separate terminals.
+4. Set the Convex deployment environment variables listed in `.env.example`. The credentials encryption key must be a securely generated, base64-encoded 32-byte key. Keep it stable: changing it does not re-encrypt existing mailbox passwords.
+5. Configure Clerk's Convex JWT integration and `CLERK_JWT_ISSUER_DOMAIN` on the Convex deployment.
+
+`EXPERIENTIAL_API_KEY` enables Jev classification. Without it, ingest uses deterministic Primary/Other heuristics and records classification for a bounded later retry. Retry category descriptions are captured at ingest, so subsequent category edits do not retroactively categorize old mail. Manual corrections take precedence over retries.
+
+See `AGENTS.md` for the architecture, data-I/O rules and local dev-auth harness. Dev auth is test-only. Never enable `POST_DEV_AUTH`, `NEXT_PUBLIC_POST_DEV_AUTH` or `POST_DEV_AUTH_ISSUER` in production.
+
+## Verification
+
+```sh
+npm run typecheck
+npm run lint
+npm test -- --maxWorkers=4
+npm run build
+```
+
+Opt-in live suites require a local Convex backend at `127.0.0.1:3210`. They create temporary Ethereal accounts, send test messages, and clean up their own test resources. They are not production tests and do not establish Spacemail or Clerk production compatibility.
+
+- `npx tsx scripts/live-e2e.ts`: wire-level sync, moves, flags, bodies, attachments, sending and cleanup.
+- `npx tsx scripts/live-ui-e2e.ts`: browser interaction, inline CID images, quotes, dialog layering, snooze, scheduling/cancellation, multiple mailboxes and responsive navigation. Requires Next dev at `localhost:3000` and the dev-auth harness.
+- `npx tsx scripts/live-mcp.ts`: real HTTP MCP tool coverage. Set `POST_MCP_URL=http://localhost:3000` to reuse an existing Next server. The default starts its own server and requires that no other Next dev process holds the project's dev lock.
+- `npx tsx scripts/screenshots.ts`: fresh `/dev/preview` captures in `artifacts/screens/`, compared with the Paper exports in `design/`.
+
+Live wire, MCP and browser suites use separate test owners. Artifacts, backend state and environment files are ignored by Git. API keys are masked in new browser screenshots.
+
+## Deployment
+
+Configure Clerk and Convex for production, deploy Convex functions and indexes, and provide the frontend Convex URL and Clerk keys to Vercel. Provide the encryption and Jev keys to Convex, not to the browser. Remove all dev-auth flags and the development JWT issuer before deploying.
+
+Create a `post_sk_` key in Settings, then configure your MCP client to use `https://YOUR_HOST/api/mcp` with `Authorization: Bearer YOUR_KEY`. Post exposes 34 tools, including scheduled-send cancellation. Keys are shown once, stored hashed, and can be revoked in Settings.
+
+Message bodies and received attachments remain on IMAP, not in Convex. Reader content is cached in a bounded client-side cache. Fresh IMAP connections can still take several seconds; the reader supplies loading, timeout and retry feedback rather than retaining a permanent skeleton.

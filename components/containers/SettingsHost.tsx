@@ -204,7 +204,7 @@ function ConnectionsTab({
           className="rounded-xl border border-divider p-3.5 flex flex-col gap-2"
         >
           <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center size-7 rounded-md bg-account-badge text-[13px] font-semibold text-icon-strong">
+            <div className="flex items-center justify-center size-7 rounded-md bg-badge-bg text-[13px] font-semibold text-icon-strong">
               {(a.displayName || a.email)[0]?.toUpperCase()}
             </div>
             <div className="min-w-0 grow">
@@ -444,6 +444,7 @@ const TOOL_LIST = [
   "update_draft",
   "delete_draft",
   "send_draft",
+  "cancel_scheduled_send",
   "mark_read",
   "mark_unread",
   "star",
@@ -718,7 +719,7 @@ export function SettingsHost({
     >
       <Dialog.Portal>
         <Dialog.Backdrop className="dialog-backdrop fixed inset-0 z-[60] bg-black/25" />
-        <Dialog.Popup className="dialog-popup fixed left-1/2 top-1/2 z-[61] w-176 max-w-[94vw] h-[min(36rem,88vh)] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-menu menu-shadow ring-1 ring-menu-ring overflow-clip flex">
+        <Dialog.Popup className="dialog-popup fixed left-1/2 top-1/2 z-[61] w-176 max-w-[94vw] h-[min(36rem,88vh)] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-app menu-shadow ring-1 ring-menu-ring overflow-clip flex">
           <div className="w-44 shrink-0 bg-sidebar border-r border-sidebar-border p-2 pt-4 flex flex-col gap-0.5">
             {TABS.map((t) => (
               <button

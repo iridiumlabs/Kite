@@ -32,11 +32,18 @@ export const create = mutation({
       .query("categories")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
+    const name = args.name.trim();
+    if (!name) throw new Error("Category name cannot be empty.");
+    if (
+      existing.some((c) => c.name.trim().toLowerCase() === name.toLowerCase())
+    ) {
+      throw new Error("A category with this name already exists.");
+    }
     const sortOrder =
       existing.reduce((max, c) => Math.max(max, c.sortOrder), -1) + 1;
     return await ctx.db.insert("categories", {
       userId,
-      name: args.name,
+      name,
       description: args.description,
       color: args.color ?? "#0a84ff",
       sortOrder,
@@ -58,7 +65,24 @@ export const update = mutation({
     const cat = await ctx.db.get(args.categoryId);
     if (!cat || cat.userId !== userId) throw new Error("Category not found");
     const patch: Record<string, unknown> = {};
-    if (args.name !== undefined) patch.name = args.name;
+    if (args.name !== undefined) {
+      const name = args.name.trim();
+      if (!name) throw new Error("Category name cannot be empty.");
+      const siblings = await ctx.db
+        .query("categories")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .collect();
+      if (
+        siblings.some(
+          (c) =>
+            c._id !== args.categoryId &&
+            c.name.trim().toLowerCase() === name.toLowerCase(),
+        )
+      ) {
+        throw new Error("A category with this name already exists.");
+      }
+      patch.name = name;
+    }
     if (args.description !== undefined) patch.description = args.description;
     if (args.color !== undefined) patch.color = args.color;
     if (Object.keys(patch).length > 0) {

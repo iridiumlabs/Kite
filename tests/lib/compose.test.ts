@@ -10,6 +10,7 @@ import {
   quoteText,
   forwardHeaderBlock,
   htmlToText,
+  appendOriginalQuote,
   type ComposeOriginal,
 } from "../../convex/lib/compose";
 
@@ -28,6 +29,19 @@ function original(over: Partial<ComposeOriginal> = {}): ComposeOriginal {
     ...over,
   };
 }
+
+test("shared draft quoting preserves both alternatives and escapes plaintext originals", () => {
+  const reply = appendOriginalQuote("reply", original(), { text: "Original <unsafe> & text" }, { html: "<p>Thanks</p>" });
+  expect(reply.html).toContain("<p>Thanks</p>");
+  expect(reply.html).toContain("&lt;unsafe&gt; &amp; text");
+  expect(reply.text).toContain("Thanks");
+  expect(reply.text).toContain("> Original <unsafe> & text");
+  const forward = appendOriginalQuote("forward", original(), { html: "<p>Original body</p>" }, { text: "For your review" });
+  expect(forward.html).toContain("Forwarded message");
+  expect(forward.html).toContain("<p>Original body</p>");
+  expect(forward.text).toContain("For your review");
+  expect(forward.text).toContain("Original body");
+});
 
 describe("replyRecipients", () => {
   test("reply goes to From", () => {

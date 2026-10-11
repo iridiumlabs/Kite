@@ -18,10 +18,7 @@ import {
   replySubjectFor,
   forwardSubjectFor,
   newMessageId,
-  wroteAttribution,
-  quoteHtml,
-  quoteText,
-  forwardHeaderBlock,
+  appendOriginalQuote,
   htmlToText,
 } from "./lib/compose";
 import { sendContentHash } from "./lib/idempotency";
@@ -165,7 +162,7 @@ export const completeSend = internalMutation({
         if (original.uid !== undefined && folder) {
           await enqueueOp(ctx, {
             userId: log.userId,
-            accountId: args.accountId,
+            accountId: original.accountId,
             kind: "flags",
             payload: {
               updates: [
@@ -327,6 +324,20 @@ async function executeSend(
     { accountId: args.accountId, userId: args.userId },
   );
   if (!account) throw new Error("Account not found");
+  if (args.draftId) {
+    const draft = await ctx.runQuery(internal.send.draftForSend, { draftId: args.draftId });
+    if (!draft || draft.userId !== args.userId || draft.accountId !== args.accountId) throw new Error("Draft not found");
+  }
+  if (args.replyToMessageDocId) {
+    const original = await ctx.runQuery(internal.send.messageForCompose, { messageId: args.replyToMessageDocId });
+    if (!original || original.userId !== args.userId) throw new Error("Message not found");
+  }
+  for (const attachment of args.performArgs.attachments ?? []) {
+    if ("messageId" in attachment) {
+      const message = await ctx.runQuery(internal.send.messageForCompose, { messageId: attachment.messageId });
+      if (!message || message.userId !== args.userId) throw new Error("Attachment not found");
+    }
+  }
   const domain = account.email.split("@")[1] ?? "localhost";
   const messageIdHeader = newMessageId(domain);
 
@@ -347,6 +358,14 @@ async function executeSend(
     const existing = begin.existing;
     if (existing.status === "failed") {
       throw new Error(existing.error ?? "Previous send failed");
+    }
+    if (args.draftId) {
+      // No SMTP attempt will complete this claim. Keep a different draft
+      // editable when its caller reuses an existing idempotency key.
+      await ctx.runMutation(internal.send.failClaimedDraft, {
+        draftId: args.draftId,
+        error: "This idempotency key is already in use. Use a new key to send this draft.",
+      });
     }
     return {
       sendLogId: existing._id,
@@ -498,12 +517,13 @@ export const sendMessage = action({
 async function loadOriginal(
   ctx: Pick<ActionCtx, "runQuery" | "runAction">,
   messageId: Id<"messages">,
+  userId: string,
 ): Promise<{ doc: Doc<"messages">; content: { html?: string; text?: string } }> {
   const doc: Doc<"messages"> | null = await ctx.runQuery(
     internal.send.messageForCompose,
     { messageId },
   );
-  if (!doc) throw new Error("Message not found");
+  if (!doc || doc.userId !== userId) throw new Error("Message not found");
   let content: { html?: string; text?: string } = {};
   try {
     const c = await ctx.runAction(internal.node.content.getMessageContent, {
@@ -532,8 +552,7 @@ export const reply = action({
   },
   handler: async (ctx, args): Promise<SendOutcome> => {
     const userId = await requireUserId(ctx, args.apiKey);
-    const { doc: original, content } = await loadOriginal(ctx, args.messageId);
-    if (original.userId !== userId) throw new Error("Message not found");
+    const { doc: original, content } = await loadOriginal(ctx, args.messageId, userId);
     const accountId = args.accountId ?? original.accountId;
     const ownerAddrs: string[] = await ctx.runQuery(
       internal.send.ownerEmailsForUser,
@@ -575,18 +594,8 @@ export const reply = action({
       date: original.date,
     });
 
-    let html = args.html;
-    let text = args.text;
-    const includeQuote = args.includeQuote ?? true;
-    if (includeQuote) {
-      const attribution = wroteAttribution(original.date, original.from);
-      if (html !== undefined || (text === undefined && content.html)) {
-        const quoteBody = content.html ?? htmlToText(content.text ?? "");
-        html = `${html ?? ""}<p>${attribution.replace(/</g, "&lt;")}</p>${quoteHtml(quoteBody, !!content.html)}`;
-      }
-      const bodyText = content.text ?? htmlToText(content.html ?? "");
-      text = `${text ?? args.text ?? ""}${text || args.text ? "\n\n" : ""}${attribution}\n${quoteText(bodyText)}`.trim();
-    }
+    const { html, text } = args.includeQuote === false ? args :
+      appendOriginalQuote(args.replyAll ? "replyAll" : "reply", original, content, args);
 
     return await executeSend(ctx, {
       userId,
@@ -627,8 +636,7 @@ export const forward = action({
   },
   handler: async (ctx, args): Promise<SendOutcome> => {
     const userId = await requireUserId(ctx, args.apiKey);
-    const { doc: original, content } = await loadOriginal(ctx, args.messageId);
-    if (original.userId !== userId) throw new Error("Message not found");
+    const { doc: original, content } = await loadOriginal(ctx, args.messageId, userId);
     const accountId = args.accountId ?? original.accountId;
 
     const subject = forwardSubjectFor({
@@ -641,26 +649,7 @@ export const forward = action({
       replyTo: original.replyTo,
       date: original.date,
     });
-    const block = forwardHeaderBlock(
-      {
-        messageIdHeader: original.messageIdHeader,
-        references: original.references,
-        subject: original.subject,
-        from: original.from,
-        to: original.to,
-        cc: original.cc,
-        replyTo: original.replyTo,
-        date: original.date,
-      },
-      original.to,
-    );
-
-    let html = args.html;
-    let text = args.text;
-    const bodyHtml = content.html ?? htmlToText(content.text ?? "");
-    const bodyText = content.text ?? htmlToText(content.html ?? "");
-    html = `${html ?? ""}<p>${block.html}</p>${content.html ? quoteHtml(bodyHtml, true) : `<pre>${bodyText.replace(/</g, "&lt;")}</pre>`}`;
-    text = `${text ?? ""}${text ? "\n\n" : ""}${block.text}${bodyText}`.trim();
+    const { html, text } = appendOriginalQuote("forward", original, content, args);
 
     const forwardAttachments =
       (args.includeAttachments ?? true)
@@ -696,23 +685,48 @@ export const forward = action({
   },
 });
 
+export const claimDraftForSend = internalMutation({
+  args: { userId: v.string(), draftId: v.id("drafts"), scheduledOnly: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const draft = await ctx.db.get(args.draftId);
+    if (!draft || draft.userId !== args.userId) {
+      if (args.scheduledOnly) return null;
+      throw new Error("Draft not found");
+    }
+    // An already-running old job may survive cancellation and rescheduling.
+    // It must not claim a newer schedule before that schedule is due.
+    if (args.scheduledOnly && (draft.status !== "scheduled" || draft.scheduledAt === undefined || draft.scheduledAt > Date.now())) return null;
+    if (draft.status === "sending") throw new Error("Draft is already sending");
+    if (draft.to.length + draft.cc.length + draft.bcc.length === 0) throw new Error("Add at least one recipient before sending");
+    if (!args.scheduledOnly && draft.scheduledJobId) await ctx.scheduler.cancel(draft.scheduledJobId).catch(() => {});
+    await ctx.db.patch(draft._id, { status: "sending", scheduledAt: undefined, scheduledJobId: undefined });
+    return draft;
+  },
+});
+
+export const failClaimedDraft = internalMutation({
+  args: { draftId: v.id("drafts"), error: v.string() },
+  handler: async (ctx, args) => {
+    const draft = await ctx.db.get(args.draftId);
+    if (draft?.status === "sending") await ctx.db.patch(draft._id, { status: "failed", sendError: args.error.slice(0, 500) });
+  },
+});
+
 async function runSendDraft(
   ctx: Pick<ActionCtx, "runQuery" | "runMutation" | "runAction">,
   userId: string,
   draftId: Id<"drafts">,
   idempotencyKey?: string,
   allowDuplicate?: boolean,
+  claimedDraft?: Doc<"drafts">,
 ): Promise<SendOutcome> {
-  const draft: Doc<"drafts"> | null = await ctx.runQuery(
-    internal.send.draftForSend,
-    { draftId },
+  const draft: Doc<"drafts"> | null = claimedDraft ?? await ctx.runMutation(
+    internal.send.claimDraftForSend,
+    { draftId, userId },
   );
   if (!draft || draft.userId !== userId) throw new Error("Draft not found");
   if (draft.status === "sending") throw new Error("Draft is already sending");
-  if (draft.to.length === 0) {
-    throw new Error("Add at least one recipient before sending");
-  }
-
+  try {
   let inReplyTo: string | undefined;
   let references: string[] | undefined;
   let replyToMessageDocId: Id<"messages"> | undefined;
@@ -738,6 +752,13 @@ async function runSendDraft(
     }
   }
 
+  let html = draft.html || undefined;
+  let text = draft.text || undefined;
+  if (draft.replyToMessageId && draft.mode !== "new") {
+    const { doc, content } = await loadOriginal(ctx, draft.replyToMessageId, userId);
+    ({ html, text } = appendOriginalQuote(draft.mode, doc, content, { html, text }));
+  }
+
   const performAttachments = draft.attachments.map((a) =>
     a.kind === "upload"
       ? {
@@ -755,8 +776,8 @@ async function runSendDraft(
     cc: draft.cc,
     bcc: draft.bcc,
     subject: draft.subject,
-    html: draft.html || undefined,
-    text: draft.text || undefined,
+    html,
+    text,
     inReplyTo,
     references,
     replyToMessageDocId,
@@ -769,6 +790,10 @@ async function runSendDraft(
     draftId,
     performArgs: { attachments: performAttachments },
   });
+  } catch (error) {
+    await ctx.runMutation(internal.send.failClaimedDraft, { draftId, error: error instanceof Error ? error.message : "Send failed" });
+    throw error;
+  }
 }
 
 export const sendDraft = action({
@@ -795,13 +820,11 @@ export const sendDraft = action({
 export const sendScheduledDraft = internalAction({
   args: { draftId: v.id("drafts") },
   handler: async (ctx, args): Promise<SendOutcome | undefined> => {
-    const draft: Doc<"drafts"> | null = await ctx.runQuery(
-      internal.send.draftForSend,
-      { draftId: args.draftId },
-    );
+    const existing = await ctx.runQuery(internal.send.draftForSend, { draftId: args.draftId });
+    if (!existing) return;
+    const draft = await ctx.runMutation(internal.send.claimDraftForSend, { draftId: args.draftId, userId: existing.userId, scheduledOnly: true });
     if (!draft) return;
-    if (draft.status !== "scheduled") return;
-    return await runSendDraft(ctx, draft.userId, args.draftId);
+    return await runSendDraft(ctx, draft.userId, args.draftId, undefined, undefined, draft);
   },
 });
 

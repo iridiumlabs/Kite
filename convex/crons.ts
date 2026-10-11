@@ -1,4 +1,5 @@
 import { cronJobs } from "convex/server";
+import { v } from "convex/values";
 import { internalAction, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Doc } from "./_generated/dataModel";
@@ -25,17 +26,21 @@ crons.interval(
 crons.interval("opsSweeper", { minutes: 5 }, internal.crons.opsDueTick, {});
 
 export const syncDueTick = internalAction({
-  args: {},
-  handler: async (ctx): Promise<{ scheduled: number }> => {
-    const ids = await ctx.runQuery(internal.syncStore.dueSyncAccounts, {
-      now: Date.now(),
+  args: { cursor: v.optional(v.string()), now: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<{ scheduled: number }> => {
+    const now = args.now ?? Date.now();
+    const page = await ctx.runQuery(internal.syncStore.dueSyncAccounts, {
+      now, cursor: args.cursor,
     });
-    for (const accountId of ids) {
+    for (const accountId of page.ids) {
       await ctx.scheduler.runAfter(0, internal.node.sync.syncAccount, {
         accountId,
       });
     }
-    return { scheduled: ids.length };
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.crons.syncDueTick, { now, cursor: page.continueCursor });
+    }
+    return { scheduled: page.ids.length };
   },
 });
 
@@ -61,7 +66,7 @@ export const unsnoozeBatch = internalMutation({
     const now = Date.now();
     const due = await ctx.db
       .query("threads")
-      .withIndex("by_snoozed", (q) => q.lte("snoozedUntil", now))
+      .withIndex("by_snoozed", (q) => q.gt("snoozedUntil", 0).lte("snoozedUntil", now))
       .take(UNSNOOZE_BATCH);
     for (const thread of due) {
       await writeThread(ctx, thread._id, {
@@ -74,6 +79,9 @@ export const unsnoozeBatch = internalMutation({
           now,
         ),
       });
+    }
+    if (due.length === UNSNOOZE_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.crons.unsnoozeBatch, {});
     }
     return due.length;
   },

@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   MinusIcon,
   ExpandIcon,
@@ -11,6 +11,7 @@ import {
   PaperclipIcon,
   LinkIcon,
   Trash,
+  ChevronDown,
 } from "@/components/icons";
 import { avatarColors, initials } from "@/lib/ui/avatars";
 import { formatBytes } from "@/lib/ui/dates";
@@ -48,6 +49,7 @@ export interface ComposeWindowProps {
   subjectInput: ReactNode;
   // body
   editor: ReactNode;
+  quoted?: ReactNode;
   attachments: ComposeAttachment[];
   onRemoveAttachment?: (i: number) => void;
   formatBar?: ReactNode;
@@ -162,6 +164,37 @@ function FieldRow({
         {children}
       </div>
       {right}
+    </div>
+  );
+}
+
+// Collapsed preview of the original message that will be appended as a quote
+// by the send action; not editable.
+export function QuotedPreview({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 shrink-0 rounded-lg border border-divider">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center w-full h-8 px-2.5 gap-2 text-left rounded-lg mail-row"
+      >
+        <span className="tracking-[0.08em] text-tertiary text-xs/4">•••</span>
+        <span className="grow text-tertiary text-xs/4">Quoted text</span>
+        <span
+          className="inline-flex transition-transform duration-150 ease-out"
+          style={{ transform: open ? "rotate(180deg)" : "none" }}
+        >
+          <ChevronDown className="text-quaternary" />
+        </span>
+      </button>
+      {open && (
+        <div className="max-h-48 overflow-y-auto px-3 pb-3">
+          <div className="whitespace-pre-wrap border-l-2 border-separator pl-2.5 text-secondary text-[13px]/5">
+            {text}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -283,6 +316,7 @@ export function ComposeWindow(p: ComposeWindowProps) {
       {p.formatBar}
       <div className="flex flex-col grow basis-0 min-h-0 pt-4.5 pb-4 px-4 overflow-y-auto">
         {p.editor}
+        {p.quoted}
       </div>
       {p.attachments.length > 0 && (
         <div className="flex flex-wrap shrink-0 pb-3.5 px-4 gap-2">
@@ -291,7 +325,7 @@ export function ComposeWindow(p: ComposeWindowProps) {
               key={i}
               att={a}
               onRemove={
-                p.onRemoveAttachment
+                p.onRemoveAttachment && !a.uploading
                   ? () => p.onRemoveAttachment?.(i)
                   : undefined
               }

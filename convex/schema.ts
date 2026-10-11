@@ -190,6 +190,7 @@ export default defineSchema({
       ),
     ),
     needsClassification: v.boolean(),
+    classificationCategories: v.optional(v.array(v.object({ id: v.id("categories"), name: v.string(), description: v.string() }))),
     classifyAttempts: v.number(),
     bulk: v.boolean(),
     postDraftId: v.optional(v.string()),
@@ -200,7 +201,7 @@ export default defineSchema({
     .index("by_account_msgid", ["accountId", "messageIdHeader"])
     .index("by_user_role_date", ["userId", "folderRole", "date"])
     .index("by_account_role_date", ["accountId", "folderRole", "date"])
-    .index("by_needs_classification", ["needsClassification", "classifyAttempts"])
+    .index("by_needs_classification", ["needsClassification", "folderRole", "classifyAttempts"])
     .searchIndex("search", {
       searchField: "searchText",
       filterFields: ["userId", "accountId", "folderRole"],
@@ -295,7 +296,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_user_updated", ["userId", "updatedAt"])
-    .index("by_account", ["accountId"]),
+    .index("by_account", ["accountId", "updatedAt"]),
 
   pendingOps: defineTable({
     userId: v.string(),
@@ -312,7 +313,9 @@ export default defineSchema({
     nextAttemptAt: v.number(),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
-  }).index("by_account_next", ["accountId", "nextAttemptAt"]),
+  })
+    .index("by_account_next", ["accountId", "nextAttemptAt"])
+    .index("by_next", ["nextAttemptAt"]),
 
   sendLog: defineTable({
     userId: v.string(),
@@ -330,7 +333,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_user_key", ["userId", "idempotencyKey"])
-    .index("by_user_hash", ["userId", "contentHash", "createdAt"]),
+    .index("by_user_hash", ["userId", "contentHash", "createdAt"])
+    .index("by_account", ["accountId"]),
 
   apiKeys: defineTable({
     userId: v.string(),

@@ -62,7 +62,7 @@ export function makeEngineDeps(
     now: () => Date.now(),
     log: (msg) => console.log(`[sync ${accountId}] ${msg}`),
     pushDraftRemote: async (draftId) => {
-      const res = await ctx.runAction(internal.node.draftsOps.pushDraftNow, {
+      const res = await ctx.runAction(internal.node.draftsOps.pushDraftUnderLease, {
         draftId: draftId as Id<"drafts">,
       });
       return { uid: res.uid };
@@ -88,10 +88,6 @@ export const syncAccount = internalAction({
       const imap = await openImap(ctx, args.accountId);
       if (!imap) return { skipped: "no-account" };
       try {
-        await ctx.runMutation(internal.syncStore.updateAccountSync, {
-          accountId: args.accountId,
-          status: "syncing",
-        });
         const deps = makeEngineDeps(ctx, args.accountId, imap);
         const outcome = await runAccountSync(deps);
         // lastSyncedAt/initialSyncDone are owned by the engine: it writes
@@ -152,6 +148,7 @@ export const loadOlderInternal = internalAction({
   args: {
     accountId: v.id("accounts"),
     role: v.optional(folderRoleV),
+    includeJunk: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const owner = crypto.randomUUID();
@@ -165,6 +162,11 @@ export const loadOlderInternal = internalAction({
       return { skipped: "locked" };
     }
     try {
+      const snapshot = await ctx.runQuery(internal.syncStore.getAccountSyncState, { accountId: args.accountId });
+      if (!snapshot) return { skipped: "no-account" };
+      if (!snapshot.folders.some((f) => !f.backfillDone && (!args.role || f.role === args.role || (args.includeJunk && f.role === "junk")))) {
+        return { loaded: 0 };
+      }
       const imap = await openImap(ctx, args.accountId);
       if (!imap) return { skipped: "no-account" };
       try {
@@ -172,7 +174,7 @@ export const loadOlderInternal = internalAction({
         const state = await deps.store.getAccountState();
         if (!state) return { skipped: "no-account" };
         const folders = state.folders.filter(
-          (f) => !args.role || f.role === args.role,
+          (f) => !args.role || f.role === args.role || (args.includeJunk && f.role === "junk"),
         );
         const categories = await deps.store.categories();
         let loaded = 0;
@@ -246,7 +248,7 @@ export const loadOlderInternal = internalAction({
           for (const [a, b] of syncedRanges) {
             for (let u = a; u <= b; u++) ordered.push(u);
           }
-          const reached = batch.includes(1);
+          const reached = serverUids.length <= BACKFILL_COUNT;
           const newOldest = metas.length
             ? Math.min(...metas.map((m) => m.uid), oldest)
             : oldest;

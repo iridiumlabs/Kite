@@ -21,7 +21,7 @@ import type {
   MessageContent,
   MessageItem,
 } from "@/lib/ui/types";
-import { formatMessageDate } from "@/lib/ui/dates";
+import { formatListDate, formatMessageDate } from "@/lib/ui/dates";
 import { senderDisplay } from "@/lib/ui/avatars";
 
 export interface ReaderProps {
@@ -51,6 +51,7 @@ export interface ReaderProps {
   onReplyAll: (m: MessageItem) => void;
   onForward: (m: MessageItem) => void;
   onDownloadAttachment: (m: MessageItem, a: AttachmentInfo) => void;
+  onRetryContent?: (id: string) => void;
   onLoadRemote?: () => void;
   dark?: boolean;
   recipientSummary?: (m: MessageItem) => string;
@@ -109,7 +110,7 @@ function CollapsedRow({
         {message.snippet}
       </div>
       <div className="tnum shrink-0 text-tertiary text-xs/4">
-        {formatMessageDate(message.date)}
+        {formatListDate(message.date)}
       </div>
     </button>
   );
@@ -129,6 +130,7 @@ function ExpandedMessage({
   onReplyAll,
   onForward,
   onDownloadAttachment,
+  onRetryContent,
   onLoadRemote,
   recipientSummary,
 }: {
@@ -139,6 +141,7 @@ function ExpandedMessage({
   onReplyAll: () => void;
   onForward: () => void;
   onDownloadAttachment: (a: AttachmentInfo) => void;
+  onRetryContent?: () => void;
   onLoadRemote?: () => void;
   recipientSummary?: (m: MessageItem) => string;
 }) {
@@ -198,7 +201,11 @@ function ExpandedMessage({
         </div>
       ) : null}
       <div className="flex flex-col max-w-175 pl-12">
-        <MessageBody content={content} dark={dark} />
+        <MessageBody
+          content={content}
+          dark={dark}
+          onRetry={onRetryContent}
+        />
       </div>
       {attachments.length > 0 && (
         <div className="flex flex-wrap pl-12 gap-2">
@@ -211,7 +218,7 @@ function ExpandedMessage({
           ))}
         </div>
       )}
-      <div className="flex items-center pt-2.5 pl-12 gap-2 pb-1">
+      <div className="flex flex-wrap items-center pt-2.5 pl-12 gap-2 pb-1">
         <ActionButton icon={<ReplyIcon size={14} strokeWidth={1.9} />} kbd="R" onClick={onReply}>
           Reply
         </ActionButton>
@@ -246,7 +253,7 @@ function ActionButton({
       <span className="text-icon-strong inline-flex">{icon}</span>
       <div className="font-medium text-primary text-[13px]/4">{children}</div>
       {kbd && (
-        <div className="pl-0.5">
+        <div className="pl-0.5 max-[767px]:hidden">
           <div className="font-medium text-quaternary text-[11px]/3.5">
             {kbd}
           </div>
@@ -259,7 +266,7 @@ function ActionButton({
 export function Reader(p: ReaderProps) {
   return (
     <div className="flex flex-col grow basis-0 h-full bg-app min-w-0">
-      <div className="flex items-center justify-between h-13 shrink-0 px-12 max-[1200px]:px-6">
+      <div className="flex items-center justify-between h-13 shrink-0 px-12 max-[1200px]:px-6 max-[767px]:px-3">
         <div className="flex items-center gap-1">
           {p.headerLeft}
           <ToolbarButton label="Archive" onClick={p.onArchive}>
@@ -305,11 +312,11 @@ export function Reader(p: ReaderProps) {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col pt-3.5 pb-10 px-14 max-[1200px]:px-8">
+        <div className="flex flex-col pt-3.5 pb-10 px-14 max-[1200px]:px-8 max-[767px]:px-4">
           <div className="flex flex-col pb-5.5 gap-1.5">
-            <div className="tracking-[-0.021em] font-bold text-primary text-[22px]/7">
+            <h1 className="tracking-[-0.021em] font-bold text-primary text-[22px]/7">
               {p.subject}
-            </div>
+            </h1>
             <div className="flex items-center gap-1.5">
               <div className="text-tertiary text-xs/4">
                 {p.messageCount}{" "}
@@ -335,6 +342,7 @@ export function Reader(p: ReaderProps) {
                 onReplyAll={() => p.onReplyAll(m)}
                 onForward={() => p.onForward(m)}
                 onDownloadAttachment={(a) => p.onDownloadAttachment(m, a)}
+                onRetryContent={() => p.onRetryContent?.(m.id)}
                 onLoadRemote={p.onLoadRemote}
                 recipientSummary={p.recipientSummary}
               />

@@ -141,7 +141,12 @@ function nextWeekday(target: number, h = 8): Date {
 
 export const SNOOZE_PRESETS: { label: string; at: () => number }[] = [
   { label: "Later today", at: () => nextHour(18).getTime() },
-  { label: "Tomorrow", at: () => nextHour(8).getTime() },
+  { label: "Tomorrow", at: () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(8, 0, 0, 0);
+    return d.getTime();
+  } },
   { label: "This weekend", at: () => nextWeekday(6, 8).getTime() },
   { label: "Next week", at: () => nextWeekday(1, 8).getTime() },
 ];

@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const CONVEX_URL = "http://127.0.0.1:3210";
-const USER = "live-e2e-user";
+const USER = "live-wire-user";
 const TAG = `e2e-${Date.now().toString(36)}`;
 
 interface EthAccount {
@@ -723,11 +723,18 @@ async function main() {
   await runSync(accountA);
   const snap6b = snapshotDocs(await state.snapshot());
   // Our own flag/move ops change server state; the follow-up sync may
-  // advance folder STATUS fields (highestModseq etc.) but must not touch
-  // mail docs, message flags, or syncedUids.
+  // advance compact folder snapshots, but must not touch mail documents.
   const d6 = countDeltas(snap6a, snap6b, { allowStatusOnly: true });
   for (const d of d6.diffs.slice(0, 10)) note(`  ${d}`);
-  ok("post-ops sync is a no-op", d6.n === 0, `${d6.n} doc deltas`);
+  // Applying remote ops changes folder flags and STATUS values. This first
+  // reconciliation may update compact snapshots, but must then stabilize.
+  ok("post-ops reconciliation does not rewrite mail", d6.diffs.every(d => d.startsWith("note ") || d.startsWith("delta folders:")), d6.diffs.join("; "));
+  if (d6.n) note(`post-ops reconciliation updated ${d6.n} compact snapshot(s)`);
+  const stableBefore = snapshotDocs(await state.snapshot());
+  await runSync(accountA);
+  const stableAfter = snapshotDocs(await state.snapshot());
+  const stableDiff = countDeltas(stableBefore, stableAfter);
+  ok("unchanged sync after remote-op reconciliation is a no-op", stableDiff.n === 0, `${stableDiff.n} doc deltas`);
 
   // ---- Step 7: content + attachment fetch ----
   step("7", "getMessageContent + downloadAttachment");

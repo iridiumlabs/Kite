@@ -112,6 +112,29 @@ export function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+// Shared quote composition for direct replies/forwards and saved or scheduled drafts.
+export function appendOriginalQuote(
+  mode: "reply" | "replyAll" | "forward",
+  original: ComposeOriginal,
+  content: { html?: string; text?: string },
+  body: { html?: string; text?: string },
+): { html: string; text: string } {
+  const originalText = content.text ?? htmlToText(content.html ?? "");
+  const quote = quoteHtml(content.html ?? originalText, !!content.html);
+  if (mode === "forward") {
+    const header = forwardHeaderBlock(original, original.to);
+    return {
+      html: `${body.html ?? escapeHtml(body.text ?? "").replace(/\n/g, "<br>")}<p>${header.html}</p>${quote}`,
+      text: `${body.text ?? htmlToText(body.html ?? "")}\n\n${header.text}${originalText}`.trim(),
+    };
+  }
+  const attribution = wroteAttribution(original.date, original.from);
+  return {
+    html: `${body.html ?? escapeHtml(body.text ?? "").replace(/\n/g, "<br>")}<p>${escapeHtml(attribution)}</p>${quote}`,
+    text: `${body.text ?? htmlToText(body.html ?? "")}\n\n${attribution}\n${quoteText(originalText)}`.trim(),
+  };
+}
+
 const BLOCK_TAG_RE =
   /<\/(p|div|blockquote|li|tr|table|h[1-6]|ul|ol|section|article|header|footer)>/gi;
 const BR_RE = /<br\s*\/?>/gi;

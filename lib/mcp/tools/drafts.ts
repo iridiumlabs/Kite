@@ -139,6 +139,7 @@ export function registerDraftTools(server: McpServer, getBackend: BackendFor) {
         "Replaces the given fields on a draft and schedules a fresh copy to the server Drafts folder, replacing the previous remote version.",
       inputSchema: z.object({
         draftId: z.string(),
+        accountId: z.string().optional().describe("Change the sending mailbox"),
         ...zDraftFields,
       }),
       outputSchema: z.object({ ok: z.boolean() }),
@@ -147,6 +148,7 @@ export function registerDraftTools(server: McpServer, getBackend: BackendFor) {
     async (args, backend) => {
       await backend.updateDraft({
         draftId: args.draftId,
+        accountId: args.accountId,
         to: args.to?.map(toAddress),
         cc: args.cc?.map(toAddress),
         bcc: args.bcc?.map(toAddress),
@@ -175,6 +177,17 @@ export function registerDraftTools(server: McpServer, getBackend: BackendFor) {
       return { ok: true };
     },
   );
+
+  addTool(server, getBackend, "cancel_scheduled_send", {
+    title: "Cancel scheduled send",
+    description: "Cancels a scheduled draft send and keeps the draft available for editing. Does not delete the draft.",
+    inputSchema: z.object({ draftId: z.string() }),
+    outputSchema: z.object({ ok: z.boolean() }),
+    annotations: { idempotentHint: true },
+  }, async (args, backend) => {
+    await backend.cancelScheduledDraft(args.draftId);
+    return { ok: true };
+  });
 
   addTool(
     server,

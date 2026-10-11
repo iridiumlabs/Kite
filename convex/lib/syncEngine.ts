@@ -647,6 +647,7 @@ export async function buildIngestArgs(
         ? undefined
         : (classified?.classifiedBy ?? "heuristic"),
       needsClassification: classified?.needsRetry ?? false,
+      classificationCategories: classified?.needsRetry ? categories : undefined,
       classifyAttempts: classified?.needsRetry ? 1 : 0,
       bulk: meta.bulk,
       postDraftId: meta.postDraftId,
@@ -724,7 +725,7 @@ async function classifyOne(
       inbox: heuristicClassify(heuristic),
       categoryIds: [],
       classifiedBy: "heuristic",
-      needsRetry: false,
+      needsRetry: true,
     };
   }
   const request: JevRequestInput = {

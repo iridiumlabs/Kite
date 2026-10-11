@@ -18,8 +18,8 @@ import { createRequire } from "node:module";
 
 const CONVEX_URL = "http://127.0.0.1:3210";
 const PORT = 3199;
-const BASE = `http://127.0.0.1:${PORT}`;
-const USER = "live-e2e-user";
+const BASE = process.env.POST_MCP_URL ?? `http://127.0.0.1:${PORT}`;
+const USER = "live-mcp-user";
 const TAG = `mcp-${Date.now().toString(36)}`;
 
 const failures: string[] = [];
@@ -29,8 +29,8 @@ function ok(name: string, cond: unknown, detail?: string) {
   if (cond) {
     console.log(`  PASS ${name}`);
   } else {
-    failures.push(`${name}${detail ? ` — ${detail}` : ""}`);
-    console.log(`  FAIL ${name}${detail ? ` — ${detail}` : ""}`);
+    failures.push(`${name}${detail ? `: ${detail}` : ""}`);
+    console.log(`  FAIL ${name}${detail ? `: ${detail}` : ""}`);
   }
 }
 function note(msg: string) {
@@ -107,6 +107,12 @@ async function freePort() {
   }
 }
 async function startNextDev() {
+  // Reuse a running server when requested, avoiding the shared .next/dev lock.
+  if (process.env.POST_MCP_URL) {
+    const res = await fetch(`${BASE}/api/mcp`);
+    if (res.status !== 401) throw new Error("Expected an unauthenticated MCP response from the running server");
+    return;
+  }
   await freePort();
   await sleep(1_000);
   nextProc = spawn("npx", ["next", "dev", "-p", String(PORT)], {
@@ -450,7 +456,7 @@ async function main() {
   step("4", "connect MCP client + list tools");
   mcp = await mcpConnect(keyValue.raw);
   const { tools } = await mcp.listTools();
-  ok("33 tools advertised", tools.length === 33, `got ${tools.length}`);
+  ok("34 tools advertised", tools.length === 34, `got ${tools.length}`);
   note(`tools: ${tools.map((t) => t.name).join(", ")}`);
 
   step("5", "list_accounts + unread counts");
@@ -674,6 +680,10 @@ async function main() {
       "draft listed",
       listed.items.some((x: AnyResult) => x.id === draftId),
     );
+    await call("send_draft", { draftId, scheduledAt: new Date(Date.now() + 86_400_000).toISOString() });
+    ok("scheduled draft exposed over MCP", sc(await call("get_draft", { draftId })).status === "scheduled");
+    await call("cancel_scheduled_send", { draftId });
+    ok("MCP cancels scheduled send without deleting draft", sc(await call("get_draft", { draftId })).status === "editing");
     const sent = sc(
       await call("send_draft", {
         draftId,

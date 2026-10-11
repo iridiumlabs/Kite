@@ -231,6 +231,7 @@ export interface IngestMessageArg {
   categoryIds?: string[];
   classifiedBy?: "jev" | "heuristic" | "manual" | "inherited";
   needsClassification?: boolean;
+  classificationCategories?: { id: string; name: string; description: string }[];
   classifyAttempts?: number;
   bulk?: boolean;
   postDraftId?: string;

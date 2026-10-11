@@ -46,6 +46,7 @@ export interface IngestInput {
   categoryIds?: Id<"categories">[];
   classifiedBy?: "jev" | "heuristic" | "manual" | "inherited";
   needsClassification?: boolean;
+  classificationCategories?: { id: Id<"categories">; name: string; description: string }[];
   classifyAttempts?: number;
   bulk?: boolean;
   postDraftId?: string;
@@ -217,7 +218,8 @@ export async function ingestMessage(
     inbox,
     categoryIds: input.categoryIds ?? [],
     classifiedBy,
-    needsClassification: input.needsClassification ?? false,
+    needsClassification: !thread?.inboxManual && (input.needsClassification ?? false),
+    classificationCategories: !thread?.inboxManual && input.needsClassification ? input.classificationCategories ?? [] : undefined,
     classifyAttempts: input.classifyAttempts ?? 0,
     bulk: input.bulk ?? false,
     postDraftId: input.postDraftId,

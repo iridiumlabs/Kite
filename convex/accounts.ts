@@ -59,6 +59,8 @@ export const remove = mutation({
       .collect();
     for (const f of folders) await ctx.db.delete(f._id);
     await ctx.db.delete(args.accountId);
+    const settings = await ctx.db.query("userSettings").withIndex("by_user", q => q.eq("userId", userId)).first();
+    if (settings?.defaultAccountId === args.accountId) await ctx.db.patch(settings._id, { defaultAccountId: undefined });
     await ctx.scheduler.runAfter(0, internal.accounts.purgeAccountBatch, {
       userId,
       accountId: args.accountId,
@@ -98,6 +100,10 @@ export const purgeAccountBatch = internalMutation({
       .withIndex("by_account", (q) => q.eq("accountId", args.accountId))
       .take(ROW_BATCH);
     for (const d of drafts) {
+      if (d.scheduledJobId) await ctx.scheduler.cancel(d.scheduledJobId).catch(() => {});
+      for (const attachment of d.attachments) {
+        if (attachment.kind === "upload") await ctx.storage.delete(attachment.storageId);
+      }
       await ctx.db.delete(d._id);
       const counter = await ctx.db
         .query("counters")
@@ -114,9 +120,9 @@ export const purgeAccountBatch = internalMutation({
       .withIndex("by_account_next", (q) => q.eq("accountId", args.accountId))
       .take(ROW_BATCH);
     for (const op of ops) await ctx.db.delete(op._id);
-    const sendLogs = (await ctx.db.query("sendLog").collect())
-      .filter((row) => row.accountId === args.accountId)
-      .slice(0, ROW_BATCH);
+    const sendLogs = await ctx.db.query("sendLog")
+      .withIndex("by_account", (q) => q.eq("accountId", args.accountId))
+      .take(ROW_BATCH);
     for (const row of sendLogs) await ctx.db.delete(row._id);
     if (
       drafts.length === ROW_BATCH ||
@@ -191,6 +197,10 @@ export const insertAccount = internalMutation({
     sortOrder: v.number(),
   },
   handler: async (ctx, args) => {
+    // Repeat the duplicate check transactionally after connection validation,
+    // so concurrent connect actions cannot create the same mailbox twice.
+    const existing = await ctx.db.query("accounts").withIndex("by_user", q => q.eq("userId", args.userId)).collect();
+    if (existing.some(a => normalizeEmail(a.email) === normalizeEmail(args.email))) throw new Error("This mailbox is already connected");
     const now = Date.now();
     const accountId = await ctx.db.insert("accounts", {
       userId: args.userId,
@@ -422,7 +432,7 @@ export const testConnection = action({
     await ctx.runMutation(internal.syncStore.updateAccountSync, {
       accountId: args.accountId,
       lastError: null,
-      status: account.status === "auth_error" ? "ready" : undefined,
+      status: account.status === "auth_error" || account.status === "error" ? "ready" : undefined,
       nextSyncAfter: null,
     });
     return { ok: true };

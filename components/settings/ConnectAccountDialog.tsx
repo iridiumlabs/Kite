@@ -67,7 +67,7 @@ export function ConnectAccountDialog({
     <Dialog.Root open={open} onOpenChange={(o: boolean) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Backdrop className="dialog-backdrop fixed inset-0 z-[60] bg-black/25" />
-        <Dialog.Popup className="dialog-popup fixed left-1/2 top-1/2 z-[61] w-105 max-w-[92vw] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-menu p-5 menu-shadow ring-1 ring-menu-ring">
+        <Dialog.Popup className="dialog-popup fixed left-1/2 top-1/2 z-[61] w-105 max-w-[92vw] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-app p-5 menu-shadow ring-1 ring-menu-ring">
           <Dialog.Title className="font-semibold text-primary text-[15px]/5">
             Connect account
           </Dialog.Title>

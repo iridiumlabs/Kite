@@ -168,6 +168,7 @@ export interface PostBackend {
   }): Promise<string>;
   updateDraft(args: {
     draftId: string;
+    accountId?: string;
     to?: AddressIn[];
     cc?: AddressIn[];
     bcc?: AddressIn[];
@@ -177,6 +178,7 @@ export interface PostBackend {
   }): Promise<void>;
   discardDraft(draftId: string): Promise<void>;
   scheduleDraft(draftId: string, at: number): Promise<void>;
+  cancelScheduledDraft(draftId: string): Promise<void>;
 
   setRead(targets: ThreadTargets, read: boolean): Promise<void>;
   setStarred(targets: ThreadTargets, starred: boolean): Promise<void>;
@@ -302,6 +304,7 @@ export function convexBackend(apiKey: string, convexUrl: string): PostBackend {
       mutation("drafts:discard", { draftId }) as Promise<void>,
     scheduleDraft: (draftId, at) =>
       mutation("drafts:scheduleSend", { draftId, at }) as Promise<void>,
+    cancelScheduledDraft: draftId => mutation("drafts:cancelScheduledSend", { draftId }) as Promise<void>,
 
     setRead: (t, read) => mutation("mail:setRead", { ...t, read }) as Promise<void>,
     setStarred: (t, starred) =>

@@ -36,9 +36,18 @@ export async function connectImap(
     logger: false,
     socketTimeout: 60_000,
     greetingTimeout: 15_000,
+    disableAutoIdle: true,
   });
-  await client.connect();
-  return client;
+  // ImapFlow closes the connection and rejects pending commands on socket
+  // failure. Consume its error event so it cannot crash the Node action.
+  client.on("error", () => {});
+  try {
+    await client.connect();
+    return client;
+  } catch (error) {
+    client.close();
+    throw error;
+  }
 }
 
 export function capabilitiesOf(client: ImapFlow): SyncCapabilities {

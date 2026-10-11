@@ -301,6 +301,18 @@ describe("categories", () => {
       description: "second",
       color: "#222222",
     });
+    await expect(
+      asU.mutation(api.categories.create, {
+        name: "  a  ",
+        description: "dupe, case-insensitive and trimmed",
+      }),
+    ).rejects.toThrow("A category with this name already exists.");
+    await expect(
+      asU.mutation(api.categories.update, {
+        categoryId: catB,
+        name: "a",
+      }),
+    ).rejects.toThrow("A category with this name already exists.");
     await asU.mutation(api.categories.update, {
       categoryId: catA,
       name: "A2",

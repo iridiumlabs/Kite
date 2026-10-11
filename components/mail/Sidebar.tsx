@@ -9,8 +9,6 @@ import {
   FileText,
   Archive,
   Trash,
-  StarSidebar,
-  SnoozeSidebar,
   ChevronDown,
   Plus,
   SquarePen,
@@ -160,18 +158,6 @@ export function Sidebar(p: SidebarProps) {
         label="Archive"
       />
       <NavRow
-        selected={p.view === "snoozed"}
-        onClick={() => p.onNavigate("snoozed")}
-        icon={<SnoozeSidebar className="text-accent" />}
-        label="Snoozed"
-      />
-      <NavRow
-        selected={p.view === "starred"}
-        onClick={() => p.onNavigate("starred")}
-        icon={<StarSidebar className="text-accent" />}
-        label="Starred"
-      />
-      <NavRow
         selected={p.view === "trash"}
         onClick={() => p.onNavigate("trash")}
         icon={<Trash className="text-accent" />}
@@ -254,12 +240,13 @@ export function Sidebar(p: SidebarProps) {
                 aria-label="Syncing"
               />
             )}
-            {!a.syncing && a.status !== "active" && (
-              <span
-                className="size-1.5 rounded-full bg-danger"
-                title={a.lastError ?? "Connection issue"}
-              />
-            )}
+            {!a.syncing &&
+              (a.status === "error" || a.status === "auth_error") && (
+                <span
+                  className="size-1.5 rounded-full bg-danger"
+                  title={a.lastError ?? "Connection issue"}
+                />
+              )}
             {a.unread !== undefined && a.unread > 0 && (
               <div className="tnum text-tertiary text-xs/4">{a.unread}</div>
             )}

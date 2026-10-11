@@ -112,10 +112,8 @@ export const retryBatch = internalAction({
         password,
       });
       try {
-        const categories = await ctx.runQuery(
-          internal.syncStore.categoriesForAccount,
-          { accountId },
-        );
+        // Retry against the ingest-time category descriptions, not categories
+        // added or edited since the message arrived.
         const port = new FlowPort(imap);
         const updates: {
           messageId: Id<"messages">;
@@ -176,7 +174,7 @@ export const retryBatch = internalAction({
                       previousMessages: tc.previousMessages,
                     }
                   : undefined,
-                categories,
+                categories: item.classificationCategories,
               },
               heuristic: {
                 folderRole,
@@ -208,7 +206,7 @@ export const retryBatch = internalAction({
               inbox: "primary",
               categoryIds: [],
               classifiedBy: "heuristic",
-              needsClassification: false,
+              needsClassification: true,
               classifyAttempts: item.classifyAttempts + 1,
             });
           }

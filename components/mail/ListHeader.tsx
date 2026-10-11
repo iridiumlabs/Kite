@@ -38,9 +38,11 @@ export function SearchField({
 function FilterMenu({
   filter,
   onChange,
+  onGoView,
 }: {
   filter: ListFilter;
   onChange: (f: ListFilter) => void;
+  onGoView?: (v: "starred" | "snoozed") => void;
 }) {
   return (
     <Menu.Root>
@@ -72,6 +74,24 @@ function FilterMenu({
                 </Menu.Item>
               ))}
             </div>
+            {onGoView && (
+              <>
+                <div className="h-px bg-separator mx-2 my-1" />
+                <div className="flex flex-col py-0.5 gap-px">
+                  {(["starred", "snoozed"] as const).map((v) => (
+                    <Menu.Item
+                      key={v}
+                      onClick={() => onGoView(v)}
+                      className="flex items-center h-7 px-2 rounded-md gap-2.5 data-[highlighted]:bg-hover-strong outline-none cursor-default"
+                    >
+                      <div className="grow text-[13px]/4 text-primary">
+                        {v === "starred" ? "Starred" : "Snoozed"}
+                      </div>
+                    </Menu.Item>
+                  ))}
+                </div>
+              </>
+            )}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
@@ -85,6 +105,7 @@ export function ListHeader({
   wide,
   filter,
   onFilterChange,
+  onGoView,
   onOpenSearch,
   extra,
 }: {
@@ -93,6 +114,7 @@ export function ListHeader({
   wide?: boolean;
   filter: ListFilter;
   onFilterChange: (f: ListFilter) => void;
+  onGoView?: (v: "starred" | "snoozed") => void;
   onOpenSearch: () => void;
   extra?: ReactNode;
 }) {
@@ -116,7 +138,11 @@ export function ListHeader({
       <div className="flex items-center gap-1.5 shrink-0">
         {wide && <SearchField wide onOpen={onOpenSearch} />}
         {extra}
-        <FilterMenu filter={filter} onChange={onFilterChange} />
+        <FilterMenu
+          filter={filter}
+          onChange={onFilterChange}
+          onGoView={onGoView}
+        />
       </div>
     </div>
   );

@@ -40,6 +40,10 @@ export function useMailShortcuts(h: ShortcutHandlers) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      // Floating surfaces own their keyboard events. Do not archive, navigate
+      // or close the reader behind a dialog, menu or composer.
+      if (document.querySelector('[role="dialog"], .menu-popup, .popover-popup')) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key;
 
@@ -67,7 +71,7 @@ export function useMailShortcuts(h: ShortcutHandlers) {
       if (gPending.current) {
         gPending.current = false;
         if (gTimer.current) clearTimeout(gTimer.current);
-        if ("posdat".includes(key)) {
+        if ("posdatz*".includes(key)) {
           e.preventDefault();
           handlers.current.onGo(key);
           return;

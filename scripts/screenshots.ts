@@ -67,10 +67,16 @@ async function main() {
       deviceScaleFactor: 1,
     });
     const url = `${BASE}/dev/preview?frame=${s.frame}${s.theme ? `&theme=${s.theme}` : ""}`;
-    await page.goto(url, { waitUntil: "networkidle" });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(600);
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLIFrameElement>("iframe.body-frame")].every(frame => {
+      const doc = frame.contentDocument;
+      return !!doc?.getElementById("post-fonts") && doc.fonts.status === "loaded" &&
+        frame.getBoundingClientRect().height + 1 >= doc.body.scrollHeight;
+    }));
     const file = path.join(OUT, `${s.name}.png`);
-    await page.screenshot({ path: file });
+    await page.screenshot({ path: file, animations: "disabled" });
     console.log("captured", file);
     await page.close();
   }

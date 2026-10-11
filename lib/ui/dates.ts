@@ -2,30 +2,25 @@ import {
   format,
   isToday,
   isYesterday,
-  isThisWeek,
   isThisYear,
   differenceInCalendarDays,
 } from "date-fns";
 
-/** Right-column date in list rows: "10:42 AM" / "Yesterday" / "Friday" / "Oct 9" */
+/**
+ * Row dates: today -> "10:42 AM", yesterday -> "Yesterday", last 7 days ->
+ * weekday ("Friday"), this year -> "Oct 9", older -> "Oct 9, 2025".
+ * Used by both list layouts and collapsed reader rows.
+ */
 export function formatListDate(ts: number): string {
   const d = new Date(ts);
   if (isToday(d)) return format(d, "h:mm a");
   if (isYesterday(d)) return "Yesterday";
-  if (isThisWeek(d)) return format(d, "EEEE");
-  return format(d, "MMM d");
-}
-
-/** Compact row date: same but without "Yesterday" expansion */
-export function formatCompactDate(ts: number): string {
-  const d = new Date(ts);
-  if (isToday(d)) return format(d, "h:mm a");
-  if (isYesterday(d)) return "Yesterday";
   if (differenceInCalendarDays(new Date(), d) < 7) return format(d, "EEEE");
-  return format(d, "MMM d");
+  if (isThisYear(d)) return format(d, "MMM d");
+  return format(d, "MMM d, yyyy");
 }
 
-/** Reader collapsed message date: "Oct 9" */
+/** Expanded reader message date: "Today, 10:42 AM" / "Oct 9" / "Oct 9, 2025" */
 export function formatMessageDate(ts: number): string {
   const d = new Date(ts);
   if (isToday(d)) return format(d, "'Today,' h:mm a");
@@ -34,18 +29,29 @@ export function formatMessageDate(ts: number): string {
   return format(d, "MMM d, yyyy");
 }
 
-/** Section headers in the wide list: Today / Yesterday / Earlier this week / month */
+/**
+ * Group headers in the two-column list: Today, Yesterday, Earlier this week,
+ * Last week, then month names, then "Month Year" for previous years.
+ */
 export function dateGroupLabel(ts: number): string {
   const d = new Date(ts);
+  const diff = differenceInCalendarDays(new Date(), d);
   if (isToday(d)) return "Today";
   if (isYesterday(d)) return "Yesterday";
-  if (differenceInCalendarDays(new Date(), d) < 6) return "Earlier this week";
-  return format(d, "MMMM");
+  if (diff < 7) return "Earlier this week";
+  if (diff < 14) return "Last week";
+  if (isThisYear(d)) return format(d, "MMMM");
+  return format(d, "MMMM yyyy");
 }
 
 export function groupKey(ts: number): string {
   const label = dateGroupLabel(ts);
-  if (label === "Today" || label === "Yesterday" || label === "Earlier this week") {
+  if (
+    label === "Today" ||
+    label === "Yesterday" ||
+    label === "Earlier this week" ||
+    label === "Last week"
+  ) {
     return label;
   }
   return format(new Date(ts), "yyyy-MM");

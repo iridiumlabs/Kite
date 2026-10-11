@@ -76,6 +76,8 @@ export interface MessageContent {
   quotedHtml?: string;
   remoteImagesBlocked?: number;
   attachments?: AttachmentInfo[];
+  /** Set when the fetch failed; MessageBody renders an inline error + Retry */
+  error?: string;
 }
 
 export interface UserInfo {

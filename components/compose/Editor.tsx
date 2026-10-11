@@ -18,6 +18,8 @@ export function useComposeEditor(opts: {
     extensions: [
       StarterKit.configure({
         heading: false,
+        link: false,
+        underline: false,
         codeBlock: false,
         horizontalRule: false,
       }),

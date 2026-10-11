@@ -60,6 +60,7 @@ export const ingest = internalMutation({
       ),
     ),
     needsClassification: v.optional(v.boolean()),
+  classificationCategories: v.optional(v.array(v.object({ id: v.id("categories"), name: v.string(), description: v.string() }))),
     classifyAttempts: v.optional(v.number()),
     bulk: v.optional(v.boolean()),
     postDraftId: v.optional(v.string()),
