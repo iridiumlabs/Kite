@@ -135,6 +135,7 @@ export const completeSend = internalMutation({
         inline: v.boolean(),
       }),
     ),
+    sourceStorageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
     const log = await ctx.db.get(args.sendLogId);
@@ -150,6 +151,7 @@ export const completeSend = internalMutation({
       folderId: args.sentFolderId ?? null,
       folderRole: "sent",
       uid: args.sentUid,
+      sourceStorageId: args.sourceStorageId,
       messageIdHeader: args.messageIdHeader,
       inReplyTo: args.inReplyTo,
       references: args.references.slice(-30),
@@ -168,6 +170,16 @@ export const completeSend = internalMutation({
       hasAttachments: args.attachments.length > 0,
       attachments: args.attachments.slice(0, 25),
     });
+
+    if (args.sourceStorageId && args.sentUid === undefined) {
+      await ctx.scheduler.runAfter(0, internal.node.sendOps.retrySentAppend, {
+        messageId: inserted.messageId,
+        sourceStorageId: args.sourceStorageId,
+        accountId: args.accountId,
+        messageIdHeader: args.messageIdHeader,
+        attempt: 1,
+      });
+    }
 
     if (args.rejectedRecipients?.length) {
       // A sync may have ingested the raw Sent headers before completion.
@@ -263,6 +275,29 @@ export const completeSend = internalMutation({
       rejectedRecipients: args.rejectedRecipients,
     });
     return { messageId: inserted.messageId, deduped: false, ...(args.rejectedRecipients?.length ? { rejectedRecipients: args.rejectedRecipients } : {}) };
+  },
+});
+
+export const recordSentAppendSuccess = internalMutation({
+  args: {
+    messageId: v.id("messages"),
+    folderId: v.id("folders"),
+    uid: v.number(),
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    const msg = await ctx.db.get(args.messageId);
+    if (msg) {
+      const patch: Record<string, unknown> = {};
+      if (msg.uid === undefined) patch.uid = args.uid;
+      if (!msg.folderId) patch.folderId = args.folderId;
+      if (msg.sourceStorageId) patch.sourceStorageId = undefined;
+      if (Object.keys(patch).length > 0) {
+        await ctx.db.patch(msg._id, patch);
+        await recomputeThread(ctx, msg.threadId);
+      }
+    }
+    await ctx.storage.delete(args.storageId).catch(() => {});
   },
 });
 

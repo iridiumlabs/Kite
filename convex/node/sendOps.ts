@@ -151,23 +151,30 @@ export const performSend = internalAction({
     const cc = (args.cc ?? []) as Address[];
     const bcc = (args.bcc ?? []) as Address[];
 
-    const mail = new MailComposer({
-      from: `${account.displayName} <${account.email}>`,
-      to: to.map(fmt),
-      cc: cc.map(fmt),
-      bcc: bcc.map(fmt),
-      subject: args.subject,
-      text: args.text,
-      html: args.html,
-      messageId: `<${args.messageIdHeader}>`,
-      headers,
-      attachments,
-    });
-    const source = await new Promise<Buffer>((resolve, reject) => {
-      mail.compile().build((err, msg) =>
-        err ? reject(err) : resolve(msg as Buffer),
-      );
-    });
+    const buildMimeSource = async (keepBcc: boolean) => {
+      const mail = new MailComposer({
+        from: `${account.displayName} <${account.email}>`,
+        to: to.map(fmt),
+        cc: cc.map(fmt),
+        bcc: bcc.map(fmt),
+        subject: args.subject,
+        text: args.text,
+        html: args.html,
+        messageId: `<${args.messageIdHeader}>`,
+        headers,
+        attachments,
+      });
+      const compiled = mail.compile();
+      if (keepBcc) compiled.keepBcc = true;
+      return await new Promise<Buffer>((resolve, reject) => {
+        compiled.build((err, msg) =>
+          err ? reject(err) : resolve(msg as Buffer),
+        );
+      });
+    };
+
+    const source = await buildMimeSource(false);
+    const sentSource = bcc.length > 0 ? await buildMimeSource(true) : source;
 
     // Use the same MIME identifiers as attachment downloads and sync.
     // Parse before SMTP so a parser failure is proven pre-delivery.
@@ -249,14 +256,25 @@ export const performSend = internalAction({
           sentUid = found?.uid;
         }
         if (sentUid === undefined) {
-          const res = await port.append(sentPath, source, ["\\Seen"]);
+          const res = await port.append(sentPath, sentSource, ["\\Seen"]);
           sentUid = res.uid;
         }
       } finally {
         await client.logout().catch(() => client.close());
       }
     } catch {
-      // The message was sent; a Sent copy failure is reconciled by sync.
+      // Sent append failed; persist source and retry below.
+    }
+
+    let sourceStorageId: Id<"_storage"> | undefined;
+    if (sentUid === undefined && ctx.storage) {
+      try {
+        sourceStorageId = await ctx.storage.store(
+          new Blob([new Uint8Array(sentSource)], { type: "message/rfc822" }),
+        );
+      } catch (err) {
+        console.error("Failed to persist sent source for retry:", err);
+      }
     }
 
     const completion = {
@@ -266,6 +284,7 @@ export const performSend = internalAction({
       accountId: args.accountId,
       sentFolderId,
       sentUid,
+      sourceStorageId,
       messageIdHeader: args.messageIdHeader,
       inReplyTo: args.inReplyTo,
       references: args.references ?? [],
@@ -288,6 +307,111 @@ export const performSend = internalAction({
       // so an accepted message cannot be delivered twice after a lost response.
       await ctx.scheduler.runAfter(5000, internal.send.completeSend, completion);
       throw error;
+    }
+  },
+});
+
+export const retrySentAppend = internalAction({
+  args: {
+    messageId: v.id("messages"),
+    sourceStorageId: v.id("_storage"),
+    accountId: v.id("accounts"),
+    messageIdHeader: v.string(),
+    attempt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const ref = await ctx.runQuery(internal.syncStore.messageRemoteRef, {
+      messageId: args.messageId,
+    });
+    if (!ref?.message || (ref.message.uid !== undefined && ref.message.folderId)) {
+      await ctx.storage.delete(args.sourceStorageId).catch(() => {});
+      return;
+    }
+
+    const owner = crypto.randomUUID();
+    try {
+      await ctx.runMutation(internal.syncStore.acquireLease, {
+        accountId: args.accountId,
+        owner,
+        ttlMs: 120_000,
+      });
+    } catch {
+      await ctx.scheduler.runAfter(15_000, internal.node.sendOps.retrySentAppend, args);
+      return;
+    }
+
+    try {
+      const blob = await ctx.storage.get(args.sourceStorageId);
+      if (!blob) return;
+      const source = Buffer.from(await blob.arrayBuffer());
+
+      const account = await ctx.runQuery(internal.syncStore.getAccountDoc, {
+        accountId: args.accountId,
+      });
+      const secret = await ctx.runQuery(internal.syncStore.getSecret, {
+        accountId: args.accountId,
+      });
+      if (!account || !secret) return;
+
+      const { username, password } = decryptCredentials(secret);
+      const cfg = accountToImapConfig(account);
+      const client = await connectImap({ ...cfg, username, password });
+      try {
+        const port = new FlowPort(client);
+        const sentFolder = await ctx.runQuery(internal.syncStore.folderByRole, {
+          accountId: args.accountId,
+          role: "sent",
+        });
+        const sentPath = sentFolder?.path ?? "Sent";
+        if (!sentFolder) await port.createMailbox(sentPath);
+        const sentFolderId = await ctx.runMutation(internal.syncStore.upsertFolder, {
+          accountId: args.accountId,
+          path: sentPath,
+          role: "sent",
+        });
+
+        let sentUid: number | undefined;
+        const hits = await port.searchUids(sentPath);
+        if (hits.length > 0) {
+          const metas: { uid: number; messageIdHeader: string }[] = [];
+          for await (const m of port.fetchMeta(sentPath, hits.slice(-25))) {
+            metas.push(m);
+          }
+          const found = metas.find(
+            (m) => m.messageIdHeader === args.messageIdHeader,
+          );
+          sentUid = found?.uid;
+        }
+
+        if (sentUid === undefined) {
+          const res = await port.append(sentPath, source, ["\\Seen"]);
+          sentUid = res.uid;
+        }
+
+        if (sentUid !== undefined) {
+          await ctx.runMutation(internal.send.recordSentAppendSuccess, {
+            messageId: args.messageId,
+            folderId: sentFolderId,
+            uid: sentUid,
+            storageId: args.sourceStorageId,
+          });
+        }
+      } finally {
+        await client.logout().catch(() => client.close());
+      }
+    } catch {
+      if (args.attempt < 8) {
+        const delay = Math.min(300_000, 5000 * Math.pow(2, args.attempt));
+        await ctx.scheduler.runAfter(delay, internal.node.sendOps.retrySentAppend, {
+          ...args,
+          attempt: args.attempt + 1,
+        });
+      }
+    } finally {
+      await ctx.runMutation(internal.syncStore.releaseLease, {
+        accountId: args.accountId,
+        owner,
+      });
     }
   },
 });

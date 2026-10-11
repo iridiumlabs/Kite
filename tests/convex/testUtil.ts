@@ -124,6 +124,7 @@ export interface TestMessage {
   classifyAttempts?: number;
   bulk?: boolean;
   postDraftId?: string;
+  sourceStorageId?: Id<"_storage">;
 }
 
 let counter = 1;

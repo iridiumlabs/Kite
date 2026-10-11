@@ -194,6 +194,7 @@ export default defineSchema({
     classifyAttempts: v.number(),
     bulk: v.boolean(),
     postDraftId: v.optional(v.string()),
+    sourceStorageId: v.optional(v.id("_storage")),
     searchText: v.string(),
   })
     .index("by_thread", ["threadId", "date"])

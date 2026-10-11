@@ -50,6 +50,7 @@ export interface IngestInput {
   classifyAttempts?: number;
   bulk?: boolean;
   postDraftId?: string;
+  sourceStorageId?: Id<"_storage">;
 }
 
 export function buildSearchText(input: {
@@ -156,6 +157,14 @@ export async function ingestMessage(
         hasAttachments: input.hasAttachments,
         attachments: input.attachments ?? [],
       });
+      if (input.uid !== undefined && localPlaceholder.sourceStorageId) {
+        if (!patch) {
+          await ctx.db.patch(localPlaceholder._id, { sourceStorageId: undefined });
+        } else {
+          patch.sourceStorageId = undefined;
+        }
+        await ctx.storage.delete(localPlaceholder.sourceStorageId).catch(() => {});
+      }
       if (patch) await ctx.db.patch(localPlaceholder._id, patch);
       await recomputeThread(ctx, localPlaceholder.threadId);
       return {
@@ -223,6 +232,7 @@ export async function ingestMessage(
     classifyAttempts: input.classifyAttempts ?? 0,
     bulk: input.bulk ?? false,
     postDraftId: input.postDraftId,
+    sourceStorageId: input.sourceStorageId,
     searchText: buildSearchText(input),
   });
 

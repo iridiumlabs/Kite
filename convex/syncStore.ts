@@ -56,6 +56,7 @@ const ingestMessageV = v.object({
   classifyAttempts: v.optional(v.number()),
   bulk: v.optional(v.boolean()),
   postDraftId: v.optional(v.string()),
+  sourceStorageId: v.optional(v.id("_storage")),
 });
 
 const folderStatePatchV = v.object({

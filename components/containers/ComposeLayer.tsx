@@ -704,6 +704,14 @@ function ComposePane({
       toast.error("Add a recipient first");
       return;
     }
+    if (attachments.some((a) => a.uploading)) {
+      toast.error("Wait for attachments to finish uploading");
+      return;
+    }
+    if ([...to, ...cc, ...bcc].some((c) => c.invalid)) {
+      toast.error("Fix invalid addresses");
+      return;
+    }
     const id = await save();
     if (!id || discardedRef.current) return;
     try {

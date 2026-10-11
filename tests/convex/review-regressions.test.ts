@@ -196,3 +196,176 @@ test("definite SMTP rejections release uncertain reservations, ambiguous errors 
   expect((await t.query(internal.send.sendLogEntry, { sendLogId }))?.status).toBe("failed");
   expect((await t.mutation(internal.send.beginSend, { userId: "a", accountId, contentHash: "hash", messageIdHeader: "retry@x" })).sendLogId).toBeDefined();
 });
+
+test("deleteForever preserves non-trash copies (like Sent) and recomputes the thread", async () => {
+  const t = makeT();
+  const accountId = await seedAccount(t, "a");
+  const user = t.withIdentity({ subject: "a" });
+
+  const sent = await t.mutation(internal.ingest.ingest, makeMessage("a", accountId, {
+    messageIdHeader: "sent@x", folderRole: "sent", isOutbound: true,
+  }));
+  const trashMsg = await t.mutation(internal.ingest.ingest, makeMessage("a", accountId, {
+    messageIdHeader: "reply@x", inReplyTo: "sent@x", references: ["sent@x"], folderRole: "trash",
+  }));
+  expect(trashMsg.threadId).toBe(sent.threadId);
+  const beforeThread = await t.run(ctx => ctx.db.get(sent.threadId));
+  expect(beforeThread?.location).toBe("trash");
+
+  await user.mutation(api.mail.deleteForever, { threadIds: [sent.threadId] });
+
+  const sentDoc = await t.run(ctx => ctx.db.get(sent.messageId));
+  expect(sentDoc).not.toBeNull();
+  expect(sentDoc?.folderRole).toBe("sent");
+
+  const trashDoc = await t.run(ctx => ctx.db.get(trashMsg.messageId));
+  expect(trashDoc).toBeNull();
+
+  const survivingThread = await t.run(ctx => ctx.db.get(sent.threadId));
+  expect(survivingThread).not.toBeNull();
+  expect(survivingThread?.location).not.toBe("trash");
+  expect(survivingThread?.messageCount).toBe(1);
+});
+
+test("moveToInbox moves archived and trashed messages back to inbox", async () => {
+  const t = makeT();
+  const accountId = await seedAccount(t, "a");
+  const user = t.withIdentity({ subject: "a" });
+
+  const archived = await t.mutation(internal.ingest.ingest, makeMessage("a", accountId, {
+    folderRole: "archive",
+  }));
+  expect((await t.run(ctx => ctx.db.get(archived.threadId)))?.location).toBe("archive");
+
+  await user.mutation(api.mail.moveToInbox, {
+    threadIds: [archived.threadId],
+    inbox: "primary",
+  });
+
+  const archivedAfter = await t.run(ctx => ctx.db.get(archived.messageId));
+  expect(archivedAfter?.folderRole).toBe("inbox");
+  expect(archivedAfter?.inbox).toBe("primary");
+  const threadAfterArchiveMove = await t.run(ctx => ctx.db.get(archived.threadId));
+  expect(threadAfterArchiveMove?.location).toBe("inbox");
+  expect(threadAfterArchiveMove?.inbox).toBe("primary");
+
+  const trashed = await t.mutation(internal.ingest.ingest, makeMessage("a", accountId, {
+    folderRole: "trash",
+  }));
+  expect((await t.run(ctx => ctx.db.get(trashed.threadId)))?.location).toBe("trash");
+
+  await user.mutation(api.mail.moveToInbox, {
+    threadIds: [trashed.threadId],
+    inbox: "other",
+  });
+
+  const trashedAfter = await t.run(ctx => ctx.db.get(trashed.messageId));
+  expect(trashedAfter?.folderRole).toBe("inbox");
+  expect(trashedAfter?.inbox).toBe("other");
+  const threadAfterTrashMove = await t.run(ctx => ctx.db.get(trashed.threadId));
+  expect(threadAfterTrashMove?.location).toBe("inbox");
+  expect(threadAfterTrashMove?.inbox).toBe("other");
+});
+
+test("failed sent append persists raw source, is retried, and releases storage", async () => {
+  const t = makeT();
+  const accountId = await seedAccount(t, "a");
+
+  const reservation = await t.mutation(internal.send.beginSend, {
+    userId: "a", accountId, contentHash: "hash-retry", messageIdHeader: "sent-retry@x",
+  });
+  const sendLogId = reservation.sendLogId!;
+
+  const storageId = await t.run(async (ctx) => {
+    return await ctx.storage.store(new Blob(["From: a@x\n\nTest source"]));
+  });
+
+  const result = await t.mutation(internal.send.completeSend, {
+    sendLogId,
+    accountId,
+    messageIdHeader: "sent-retry@x",
+    references: [],
+    subject: "Retryable Sent",
+    from: { email: "me@x.com" },
+    to: [{ email: "r@x.com" }],
+    cc: [],
+    bcc: [],
+    text: "Test source",
+    attachments: [],
+    sourceStorageId: storageId,
+  });
+
+  const msg = await t.run(ctx => ctx.db.get(result.messageId!));
+  expect(msg?.folderRole).toBe("sent");
+  expect(msg?.uid).toBeUndefined();
+  expect(msg?.sourceStorageId).toBe(storageId);
+
+  const folder = await t.mutation(internal.syncStore.upsertFolder, {
+    accountId,
+    path: "Sent",
+    role: "sent",
+  });
+
+  await t.mutation(internal.send.recordSentAppendSuccess, {
+    messageId: result.messageId!,
+    folderId: folder,
+    uid: 42,
+    storageId,
+  });
+
+  const updatedMsg = await t.run(ctx => ctx.db.get(result.messageId!));
+  expect(updatedMsg?.uid).toBe(42);
+  expect(updatedMsg?.folderId).toBe(folder);
+  expect(updatedMsg?.sourceStorageId).toBeUndefined();
+
+  const blob = await t.run(ctx => ctx.storage.get(storageId));
+  expect(blob).toBeNull();
+});
+
+test("getMessageContent and fetchAttachmentData read from sourceStorageId when uid is undefined", async () => {
+  const t = makeT();
+  const accountId = await seedAccount(t, "a");
+
+  const mimeRaw =
+    "From: me@x.com\r\n" +
+    "To: to@x.com\r\n" +
+    "Subject: Stored Body\r\n" +
+    "Content-Type: multipart/mixed; boundary=\"boundary123\"\r\n" +
+    "\r\n" +
+    "--boundary123\r\n" +
+    "Content-Type: text/plain\r\n" +
+    "\r\n" +
+    "Hello from stored source!\r\n" +
+    "--boundary123\r\n" +
+    "Content-Type: text/plain; name=\"hello.txt\"\r\n" +
+    "Content-Disposition: attachment; filename=\"hello.txt\"\r\n" +
+    "\r\n" +
+    "Attachment file content\r\n" +
+    "--boundary123--\r\n";
+
+  const storageId = await t.run(async (ctx) => {
+    return await ctx.storage.store(new Blob([mimeRaw]));
+  });
+
+  const msg = await t.mutation(internal.ingest.ingest, makeMessage("a", accountId, {
+    folderRole: "sent",
+    messageIdHeader: "stored@x",
+    sourceStorageId: storageId,
+  }));
+
+  const ref = await t.query(internal.syncStore.messageRemoteRef, { messageId: msg.messageId });
+  expect(ref?.message.sourceStorageId).toBe(storageId);
+
+  const content = await t.action(internal.node.content.getMessageContent, {
+    messageId: msg.messageId,
+  });
+  expect(content.text).toContain("Hello from stored source!");
+  expect(content.attachments.length).toBe(1);
+  expect(content.attachments[0].filename).toBe("hello.txt");
+
+  const attData = await t.action(internal.node.content.fetchAttachmentData, {
+    messageId: msg.messageId,
+    attachmentId: content.attachments[0].id,
+  });
+  expect(new TextDecoder().decode(attData)).toBe("Attachment file content");
+});

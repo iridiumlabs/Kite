@@ -107,3 +107,87 @@ test("draft sends own forwarded bytes before SMTP so partial retries survive rem
   expect(Buffer.from(download!.content!).toString()).toBe("attachment");
   expect(complete.attachments[0]).toMatchObject({ filename: "a.txt", size: 10, inline: false });
 });
+
+test("performSend retains Bcc headers in IMAP append while stripping them from SMTP delivery", async () => {
+  vi.useFakeTimers();
+  const appendMock = vi.fn().mockResolvedValue({ uid: 123 });
+  const { FlowPort, connectImap } = await import("../../convex/node/imap");
+  (connectImap as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+    logout: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+  });
+  (FlowPort as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+    return {
+      createMailbox: vi.fn().mockResolvedValue(undefined),
+      searchUids: vi.fn().mockResolvedValue([]),
+      fetchMeta: vi.fn().mockReturnValue((async function* () {})()),
+      append: appendMock,
+    };
+  });
+
+  h.sendMail.mockResolvedValue({ accepted: ["to@x.com", "bcc@x.com"], rejected: [] });
+  h.mutation.mockImplementation(async (ref) => {
+    if (getFunctionName(ref) === "syncStore:upsertFolder") return "folder-id";
+    if (getFunctionName(ref) === "send:completeSend") return { messageId: "sent", deduped: false };
+  });
+
+  const ctx = {
+    runQuery: vi.fn(async ref => getFunctionName(ref) === "syncStore:getAccountDoc" ? { email: "me@x.com", displayName: "Me" } : {}),
+    runMutation: h.mutation,
+  } as unknown as ActionCtx;
+
+  const args: FunctionArgs<typeof internal.node.sendOps.performSend> = {
+    accountId: "account" as Id<"accounts">, sendLogId: "log" as Id<"sendLog">,
+    to: [{ email: "to@x.com" }], bcc: [{ email: "bcc@x.com" }],
+    subject: "Bcc check", text: "Body", messageIdHeader: "bcc-check@x",
+  };
+  const handler = (performSend as unknown as { handler: (ctx: ActionCtx, input: typeof args) => Promise<unknown> }).handler;
+  const pending = handler(ctx, args);
+  await vi.waitFor(() => expect(h.sendMail).toHaveBeenCalledOnce());
+  await vi.advanceTimersByTimeAsync(2000);
+  await pending;
+  vi.useRealTimers();
+
+  // SMTP raw source must not have Bcc
+  const smtpRaw = (h.sendMail.mock.calls[0][0].raw as Buffer).toString();
+  expect(smtpRaw).not.toMatch(/^Bcc:/mi);
+
+  // IMAP append source must have Bcc preserved
+  expect(appendMock).toHaveBeenCalledOnce();
+  const imapRaw = (appendMock.mock.calls[0][1] as Buffer).toString();
+  expect(imapRaw).toMatch(/^Bcc:\s*bcc@x\.com/mi);
+});
+
+test("performSend persists raw source to storage for retry when IMAP Sent append fails", async () => {
+  vi.useFakeTimers();
+  const { connectImap } = await import("../../convex/node/imap");
+  (connectImap as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("IMAP connection refused"));
+
+  const store = vi.fn().mockResolvedValue("persisted-storage-id");
+  h.sendMail.mockResolvedValue({ accepted: ["to@x.com"], rejected: [] });
+  h.mutation.mockImplementation(async (ref) => {
+    if (getFunctionName(ref) === "send:completeSend") return { messageId: "sent", deduped: false };
+  });
+
+  const ctx = {
+    runQuery: vi.fn(async ref => getFunctionName(ref) === "syncStore:getAccountDoc" ? { email: "me@x.com", displayName: "Me" } : {}),
+    runMutation: h.mutation,
+    storage: { store, delete: vi.fn() },
+  } as unknown as ActionCtx;
+
+  const args: FunctionArgs<typeof internal.node.sendOps.performSend> = {
+    accountId: "account" as Id<"accounts">, sendLogId: "log" as Id<"sendLog">,
+    to: [{ email: "to@x.com" }], subject: "Failed append", text: "Body", messageIdHeader: "failed-append@x",
+  };
+  const handler = (performSend as unknown as { handler: (ctx: ActionCtx, input: typeof args) => Promise<unknown> }).handler;
+  const pending = handler(ctx, args);
+  await vi.waitFor(() => expect(h.sendMail).toHaveBeenCalledOnce());
+  await vi.advanceTimersByTimeAsync(2000);
+  await pending;
+  vi.useRealTimers();
+
+  expect(store).toHaveBeenCalledOnce();
+  const complete = h.mutation.mock.calls.find(([ref]) => getFunctionName(ref) === "send:completeSend")![1];
+  expect(complete.sourceStorageId).toBe("persisted-storage-id");
+  expect(complete.sentUid).toBeUndefined();
+});

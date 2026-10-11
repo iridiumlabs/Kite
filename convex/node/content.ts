@@ -81,6 +81,7 @@ async function resolveRemote(
       uid: number;
       accountId: Id<"accounts">;
     }
+  | { storageId: Id<"_storage">; accountId: Id<"accounts"> }
   | { moved: true }
 > {
   const ref = await ctx.runQuery(internal.syncStore.messageRemoteRef, {
@@ -89,6 +90,9 @@ async function resolveRemote(
   if (!ref || !ref.message) throw new Error("Message not found");
   const m = ref.message;
   if (m.uid === undefined || !ref.folderPath) {
+    if (m.sourceStorageId) {
+      return { storageId: m.sourceStorageId, accountId: m.accountId };
+    }
     await ctx.scheduler.runAfter(0, internal.node.sync.syncAccount, {
       accountId: m.accountId,
     });
@@ -139,9 +143,19 @@ export const getMessageContent = internalAction({
         "This message moved. Refreshing the mailbox, try again in a moment.",
       );
     }
-    const { port, close, folderPath, uid, accountId } = resolved;
+    const { accountId } = resolved;
+    let src: Uint8Array;
+    let close: (() => Promise<void>) | undefined;
+    if ("storageId" in resolved) {
+      const blob = await ctx.storage.get(resolved.storageId);
+      if (!blob) throw new Error("Message source not found");
+      src = new Uint8Array(await blob.arrayBuffer());
+    } else {
+      const { port, folderPath, uid } = resolved;
+      close = resolved.close;
+      src = await port.fetchSource(folderPath, uid);
+    }
     try {
-      const src = await port.fetchSource(folderPath, uid);
       const parsed = await parser.parse(src);
       const ref = await ctx.runQuery(internal.syncStore.messageRemoteRef, {
         messageId: args.messageId,
@@ -229,7 +243,7 @@ export const getMessageContent = internalAction({
         accountId: accountId as string,
       };
     } finally {
-      await close();
+      if (close) await close();
     }
   },
 });
@@ -243,9 +257,18 @@ export const fetchAttachmentData = internalAction({
         "This message moved. Refreshing the mailbox, try again in a moment.",
       );
     }
-    const { port, close, folderPath, uid } = resolved;
+    let src: Uint8Array;
+    let close: (() => Promise<void>) | undefined;
+    if ("storageId" in resolved) {
+      const blob = await ctx.storage.get(resolved.storageId);
+      if (!blob) throw new Error("Message source not found");
+      src = new Uint8Array(await blob.arrayBuffer());
+    } else {
+      const { port, folderPath, uid } = resolved;
+      close = resolved.close;
+      src = await port.fetchSource(folderPath, uid);
+    }
     try {
-      const src = await port.fetchSource(folderPath, uid);
       const parsed = await parser.parse(src);
       const att = parsed.attachments.find(
         (a) => a.id === args.attachmentId || a.cid === args.attachmentId,
@@ -254,7 +277,7 @@ export const fetchAttachmentData = internalAction({
       checkReceivedAttachmentSize(att.content.length);
       return new Uint8Array(att.content).buffer as ArrayBuffer;
     } finally {
-      await close();
+      if (close) await close();
     }
   },
 });
@@ -268,9 +291,18 @@ export const downloadAttachment = internalAction({
         "This message moved. Refreshing the mailbox, try again in a moment.",
       );
     }
-    const { port, close, folderPath, uid } = resolved;
+    let src: Uint8Array;
+    let close: (() => Promise<void>) | undefined;
+    if ("storageId" in resolved) {
+      const blob = await ctx.storage.get(resolved.storageId);
+      if (!blob) throw new Error("Message source not found");
+      src = new Uint8Array(await blob.arrayBuffer());
+    } else {
+      const { port, folderPath, uid } = resolved;
+      close = resolved.close;
+      src = await port.fetchSource(folderPath, uid);
+    }
     try {
-      const src = await port.fetchSource(folderPath, uid);
       const parsed = await parser.parse(src);
       const att = parsed.attachments.find(
         (a) => a.id === args.attachmentId || a.cid === args.attachmentId,
@@ -284,7 +316,7 @@ export const downloadAttachment = internalAction({
         data: new Uint8Array(att.content).buffer as ArrayBuffer,
       };
     } finally {
-      await close();
+      if (close) await close();
     }
   },
 });

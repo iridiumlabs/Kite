@@ -342,7 +342,7 @@ export const moveToInbox = mutation({
           patch.needsClassification = false;
           patch.classificationCategories = undefined;
         }
-        if (m.folderRole === "junk") {
+        if (m.folderRole === "junk" || m.folderRole === "archive" || m.folderRole === "trash") {
           if (inboxFolder === null) {
             inboxFolder = await folderForRole(ctx, m.accountId, "inbox");
           }
@@ -479,7 +479,9 @@ export const deleteForever = mutation({
         .query("messages")
         .withIndex("by_thread", (q) => q.eq("threadId", threadId))
         .collect();
+      let deletedCount = 0;
       for (const m of msgs) {
+        if (m.folderRole !== "trash") continue;
         const path = await folderPath(ctx, paths, m.folderId);
         if (m.uid !== undefined && path) {
           const list = ops.get(m.accountId) ?? [];
@@ -487,8 +489,13 @@ export const deleteForever = mutation({
           ops.set(m.accountId, list);
         }
         await ctx.db.delete(m._id);
+        deletedCount++;
       }
-      await writeThread(ctx, threadId, null);
+      if (deletedCount === msgs.length) {
+        await writeThread(ctx, threadId, null);
+      } else {
+        await recomputeThread(ctx, threadId);
+      }
     }
     await enqueueBatched(ctx, userId, "expunge", ops, (expunges) => ({
       expunges: expunges as ExpungeOp[],

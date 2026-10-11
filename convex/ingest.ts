@@ -64,6 +64,7 @@ export const ingest = internalMutation({
     classifyAttempts: v.optional(v.number()),
     bulk: v.optional(v.boolean()),
     postDraftId: v.optional(v.string()),
+    sourceStorageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
     return await ingestMessage(ctx, args);
