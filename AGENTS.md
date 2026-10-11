@@ -98,6 +98,19 @@ content hash within 10 minutes unless `allowDuplicate`), SMTP via nodemailer, ap
 unless the server already saved a copy (checked by Message-ID), local Sent message inserted and
 threaded, `\Answered` set on the original, draft cleaned up. Undo send is a client-side delay.
 
+## Dev auth harness (test-only)
+Local end-to-end testing runs without Clerk keys. Set `POST_DEV_AUTH=1` and
+`NEXT_PUBLIC_POST_DEV_AUTH=1` in `.env.local` plus `POST_DEV_AUTH_ISSUER`
+(the JWKS issuer URL, e.g. `http://localhost:3000/api/dev-auth`) on the Convex
+deployment. `app/api/dev-auth/token` signs a short-lived RS256 JWT (subject
+`live-e2e-user`) and `app/api/dev-auth/jwks` serves the public key; both 404
+outside development or when the flags are off. `convex/auth.config.ts` enables
+the `customJwt` provider only while `POST_DEV_AUTH_ISSUER` is set, and
+`proxy.ts` bypasses Clerk middleware in this mode. The client uses
+`ConvexProviderWithAuth` with the dev token source instead of
+`ConvexProviderWithClerk` and shows a "Dev user" profile. Never set these
+flags in production.
+
 ## Layout
 - `app/` routes, `components/` (presentational components are props-driven so `/dev/preview`
   can render them with fixtures in development), `lib/` client utilities, `lib/mcp/` MCP tools.
