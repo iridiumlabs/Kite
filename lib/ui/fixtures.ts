@@ -33,7 +33,7 @@ const outreach = FIXTURE_CATEGORIES[2];
 
 export const FIXTURE_ACCOUNTS: AccountInfo[] = [
   { id: "acc-1", email: "arham@gmail.com", status: "active", unread: 9 },
-  { id: "acc-2", email: "arham@postmail.app", status: "active", unread: 3 },
+  { id: "acc-2", email: "arham@kitemail.app", status: "active", unread: 3 },
 ];
 
 export const FIXTURE_USER: UserInfo = {
@@ -45,7 +45,7 @@ export const FIXTURE_USER: UserInfo = {
 export const FIXTURE_THREADS: ThreadItem[] = [
   {
     id: "t-maya",
-    subject: "Re: Post beta onboarding feedback",
+    subject: "Re: Kite beta onboarding feedback",
     participants: [{ name: "Maya Okafor", email: "maya@okafor.studio" }],
     snippet:
       "Went through the new import flow twice this morning. The OAuth step is so much smoother than the last build.",
@@ -103,7 +103,7 @@ export const FIXTURE_THREADS: ThreadItem[] = [
   },
   {
     id: "t-github",
-    subject: "[post/app] Fix thread grouping for forwarded messages (#214)",
+    subject: "[kite/app] Fix thread grouping for forwarded messages (#214)",
     participants: [{ name: "GitHub", email: "notifications@github.com" }],
     snippet:
       "@lena-dev approved these changes. Looks great, merging once CI is green.",
@@ -126,7 +126,7 @@ export const FIXTURE_THREADS: ThreadItem[] = [
   },
   {
     id: "t-theo",
-    subject: "Re: Intro, Post × Halcyon",
+    subject: "Re: Intro, Kite × Halcyon",
     participants: [{ name: "Theo Laurent", email: "theo@halcyon.app" }],
     snippet:
       "Thanks for the intro, Arham! I'd love to hear how you're thinking about shared inboxes.",
@@ -149,7 +149,7 @@ export const FIXTURE_THREADS: ThreadItem[] = [
   },
   {
     id: "t-vercel",
-    subject: "Deployment ready: post-web",
+    subject: "Deployment ready: kite-web",
     participants: [{ name: "Vercel", email: "notifications@vercel.com" }],
     snippet:
       "Production deployment for main (a3f9c21) completed in 41 seconds.",
@@ -185,7 +185,7 @@ export const FIXTURE_THREADS: ThreadItem[] = [
     subject: "Podcast invite: Tools for Thought",
     participants: [{ name: "Marco Bianchi", email: "marco@tft.fm" }],
     snippet:
-      "We're recording season three in November and would love to have you on to talk about Post.",
+      "We're recording season three in November and would love to have you on to talk about Kite.",
     lastMessageAt: lastWeekday(3, 20, 15),
     messageCount: 1,
     unread: false,
@@ -212,7 +212,7 @@ export const FIXTURE_MESSAGES: MessageItem[] = [
     threadId: "t-maya",
     from: { name: "Arham", email: "arham@gmail.com" },
     to: [{ name: "Maya Okafor", email: "maya@okafor.studio" }],
-    subject: "Re: Post beta onboarding feedback",
+    subject: "Re: Kite beta onboarding feedback",
     date: at(3, 9, 12),
     snippet:
       "Hey Maya, the new beta build is up on TestFlight. Would love your eyes on the import flow before we ship.",
@@ -224,7 +224,7 @@ export const FIXTURE_MESSAGES: MessageItem[] = [
     threadId: "t-maya",
     from: { name: "Maya Okafor", email: "maya@okafor.studio" },
     to: [{ name: "Arham", email: "arham@gmail.com" }],
-    subject: "Re: Post beta onboarding feedback",
+    subject: "Re: Kite beta onboarding feedback",
     date: at(2, 21, 5),
     snippet:
       "Downloading now! I'll run it against both of my accounts first thing tomorrow and report back.",
@@ -238,7 +238,7 @@ export const FIXTURE_MESSAGES: MessageItem[] = [
       { name: "Arham", email: "arham@gmail.com" },
       { name: "Jonas Weber", email: "jonas@weber.io" },
     ],
-    subject: "Re: Post beta onboarding feedback",
+    subject: "Re: Kite beta onboarding feedback",
     date: at(0, 10, 42),
     snippet:
       "Went through the new import flow twice this morning. The OAuth step is so much smoother",

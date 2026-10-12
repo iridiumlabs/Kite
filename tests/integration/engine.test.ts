@@ -238,7 +238,7 @@ class FakeImap implements ImapPort {
         /bulk|list|junk/i.test(precedence ?? "") ||
         (!!autoSubmitted && !/^no$/i.test(autoSubmitted)),
       headers: { listUnsubscribe: listUnsub, listId, precedence, autoSubmitted },
-      postDraftId: get("x-post-draft-id") || undefined,
+      kiteDraftId: get("x-kite-draft-id") || undefined,
       hasAttachments: /multipart\/mixed/i.test(get("content-type") ?? ""),
       attachments: [],
       textPartId: "1",

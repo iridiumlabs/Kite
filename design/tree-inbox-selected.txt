@@ -1,4 +1,4 @@
-Frame "Post – Inbox (email selected)" (1-0) 1440×900
+Frame "Kite – Inbox (email selected)" (1-0) 1440×900
   Frame "Sidebar" (2-0) 240×900
     Frame "Profile Row" (C-0) 219×52
       Frame "Profile Trigger" (D-0) 183×32
@@ -88,8 +88,8 @@ Frame "Post – Inbox (email selected)" (1-0) 1440×900
         Text "9" (2S-0) 7×16 "9"
       Frame "Frame" (2T-0) 219×28
         Frame "Frame" (2U-0) 16×16
-          Text "P" (2V-0) 6×12 "P"
-        Text "arham@postmail.app" (2W-0) 158×16 "arham@postmail.app"
+          Text "K" (2V-0) 6×12 "K"
+        Text "arham@kitemail.app" (2W-0) 158×16 "arham@kitemail.app"
         Text "3" (2X-0) 7×16 "3"
   Frame "Message List" (2Z-0) 380×900
     Frame "List Header" (30-0) 379×52
@@ -115,7 +115,7 @@ Frame "Post – Inbox (email selected)" (1-0) 1440×900
         Frame "Frame" (3M-0) 329×52
           Frame "Frame" (3N-0) 329×16
             ... 2 children
-          Text "Re: Post beta onboar…" (3S-0) 329×16 "Re: Post beta onboarding feedback"
+          Text "Re: Kite beta onboar…" (3S-0) 329×16 "Re: Kite beta onboarding feedback"
           Text "Went through the new…" (3T-0) 329×16 "Went through the new import flow twice this morning. The OAu"
       Frame "Row / Unread" (3U-0) 363×72
         Frame "Frame" (3V-0) 10×52
@@ -146,7 +146,7 @@ Frame "Post – Inbox (email selected)" (1-0) 1440×900
         Frame "Frame" (4S-0) 329×52
           Frame "Frame" (4T-0) 329×16
             ... 2 children
-          Text "[post/app] Fix threa…" (4W-0) 329×16 "[post/app] Fix thread grouping for forwarded messages (#214)"
+          Text "[kite/app] Fix threa…" (4W-0) 329×16 "[kite/app] Fix thread grouping for forwarded messages (#214)"
           Text "@lena-dev approved t…" (4X-0) 329×16 "@lena-dev approved these changes. Looks great, merging once "
       Frame "Frame" (4Z-0) 363×72
         Rectangle "Rectangle" (50-0) 10×52
@@ -161,14 +161,14 @@ Frame "Post – Inbox (email selected)" (1-0) 1440×900
         Frame "Frame" (5C-0) 329×52
           Frame "Frame" (5D-0) 329×16
             ... 2 children
-          Text "Re: Intro, Post × Ha…" (5I-0) 329×16 "Re: Intro, Post × Halcyon"
+          Text "Re: Intro, Kite × Ha…" (5I-0) 329×16 "Re: Intro, Kite × Halcyon"
           Text "Thanks for the intro…" (5J-0) 329×16 "Thanks for the intro, Arham! I'd love to hear how you're thi"
       Frame "Frame" (5K-0) 363×72
         Rectangle "Rectangle" (5L-0) 10×52
         Frame "Frame" (5M-0) 329×52
           Frame "Frame" (5N-0) 329×16
             ... 2 children
-          Text "Deployment ready: po…" (5Q-0) 329×16 "Deployment ready: post-web"
+          Text "Deployment ready: ki…" (5Q-0) 329×16 "Deployment ready: kite-web"
           Text "Production deploymen…" (5R-0) 329×16 "Production deployment for main (a3f9c21) completed in 41 sec"
       Frame "Frame" (5S-0) 363×72
         Rectangle "Rectangle" (5T-0) 10×52
@@ -219,7 +219,7 @@ Frame "Post – Inbox (email selected)" (1-0) 1440×900
             ... 1 children
     Frame "Thread" (7H-0) 820×742
       Frame "Thread Header" (7I-0) 708×72
-        Text "Re: Post beta onboar…" (7J-0) 708×28 "Re: Post beta onboarding feedback"
+        Text "Re: Kite beta onboar…" (7J-0) 708×28 "Re: Kite beta onboarding feedback"
         Frame "Frame" (7K-0) 708×16
           Text "3 messages" (7L-0) 69×16 "3 messages"
           Text "·" (7M-0) 4×16 "·"

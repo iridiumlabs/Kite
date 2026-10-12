@@ -1,4 +1,4 @@
-// Live wire-level E2E for Post's IMAP/SMTP engine against Ethereal.Email
+// Live wire-level E2E for Kite's IMAP/SMTP engine against Ethereal.Email
 // (real SMTP + IMAP) and the local anonymous Convex backend at :3210.
 //
 // Opt-in only — never run by `npm test`. Usage:
@@ -210,7 +210,7 @@ const require_ = createRequire(import.meta.url);
 // distinct mailboxes.
 function createEtherealAccount(): Promise<EthAccount> {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ requestor: "post-live-e2e", version: "1.0" });
+    const body = JSON.stringify({ requestor: "kite-live-e2e", version: "1.0" });
     const req = require_("node:https").request(
       {
         hostname: "api.nodemailer.com",
@@ -389,7 +389,7 @@ const PNG_1PX = Buffer.from(
 );
 const PDF_BYTES = Buffer.from(
   "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n" +
-    "2 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 40 40 Td (post live e2e) Tj ET\n" +
+    "2 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 40 40 Td (kite live e2e) Tj ET\n" +
     "endstream\nendobj\ntrailer\n<< /Size 3 /Root 1 0 R >>\n%%EOF\n",
 );
 
@@ -682,7 +682,7 @@ async function main() {
   ok("sanitize message deleted locally", !bySubj(SUB.sanitize));
   note(`counters: ${JSON.stringify(await state.counters())}`);
 
-  // ---- Step 6: Post-side ops ----
+  // ---- Step 6: Kite-side ops ----
   step("6", "pending ops: archive/unread/star/restore/trash");
 
   const aId = (bySubj(SUB.personal))._id;
@@ -909,11 +909,11 @@ async function main() {
         for await (const m of imap.fetch("1:*", {
           uid: true,
           envelope: true,
-          headers: ["x-post-draft-id"],
+          headers: ["x-kite-draft-id"],
         })) {
           rows.push({
             uid: m.uid,
-            draftHdr: /x-post-draft-id:\s*(\S+)/i.exec(m.headers?.toString() ?? "")?.[1],
+            draftHdr: /x-kite-draft-id:\s*(\S+)/i.exec(m.headers?.toString() ?? "")?.[1],
             subject: m.envelope?.subject,
           });
         }

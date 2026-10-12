@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Kite</title>
+  <path d="M32 45c-1 10-19 2-24 14" fill="none" stroke="#007AFF" stroke-width="3" stroke-linecap="round"/>
+  <path d="m45 5 13 20-26 20-19-23Z" fill="#007AFF"/>
+  <path d="m45 5 13 20-26 20Z" fill="#69B1FF"/>
+</svg>

@@ -1,7 +1,7 @@
 // Live MCP verification (opt-in; never part of `npm test`):
 //   npx tsx scripts/live-mcp.ts
 //
-// Boots `next dev` on a scratch port, mints a real post_sk_ API key for
+// Boots `next dev` on a scratch port, mints a real kite_sk_ API key for
 // USER via the internal helper, connects two Ethereal accounts through the
 // real `accounts:connect` path, then drives the whole tool surface over
 // real HTTP with the official Streamable HTTP client.
@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 
 const CONVEX_URL = "http://127.0.0.1:3210";
 const PORT = 3199;
-const BASE = process.env.POST_MCP_URL ?? `http://127.0.0.1:${PORT}`;
+const BASE = process.env.KITE_MCP_URL ?? `http://127.0.0.1:${PORT}`;
 const USER = "live-mcp-user";
 const TAG = `mcp-${Date.now().toString(36)}`;
 
@@ -108,7 +108,7 @@ async function freePort() {
 }
 async function startNextDev() {
   // Reuse a running server when requested, avoiding the shared .next/dev lock.
-  if (process.env.POST_MCP_URL) {
+  if (process.env.KITE_MCP_URL) {
     const res = await fetch(`${BASE}/api/mcp`);
     if (res.status !== 401) throw new Error("Expected an unauthenticated MCP response from the running server");
     return;
@@ -174,7 +174,7 @@ const require_ = createRequire(import.meta.url);
 // distinct mailboxes.
 function createEthereal(): Promise<EthAccount> {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ requestor: "post-live-mcp", version: "1.0" });
+    const body = JSON.stringify({ requestor: "kite-live-mcp", version: "1.0" });
     const req = require_("node:https").request(
       {
         hostname: "api.nodemailer.com",
@@ -265,7 +265,7 @@ async function runSync(accountId: string) {
 
 const PDF_BYTES = Buffer.from(
   "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n" +
-    "2 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 40 40 Td (post live mcp) Tj ET\n" +
+    "2 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 40 40 Td (kite live mcp) Tj ET\n" +
     "endstream\nendobj\ntrailer\n<< /Size 3 /Root 1 0 R >>\n%%EOF\n",
 );
 const sha256 = (b: Buffer | ArrayBuffer) =>
@@ -327,7 +327,7 @@ async function main() {
     name: `live-mcp ${TAG}`,
   })) as { id: string; key: string };
   keyValue.raw = minted.key;
-  ok("api key minted with post_sk_ prefix", keyValue.raw.startsWith("post_sk_"));
+  ok("api key minted with kite_sk_ prefix", keyValue.raw.startsWith("kite_sk_"));
 
   const A = await createEthereal();
   let B = await createEthereal();
@@ -441,7 +441,7 @@ async function main() {
       headers: {
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
-        authorization: "Bearer post_sk_deadbeefdeadbeef",
+        authorization: "Bearer kite_sk_deadbeefdeadbeef",
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -601,12 +601,12 @@ async function main() {
 
     await call("archive", { threadIds: [threadId] });
     const prim = sc(await call("list_threads", { view: "primary" }));
-    const otherPost = sc(await call("list_threads", { view: "other" }));
+    const otherAfterArchive = sc(await call("list_threads", { view: "other" }));
     const arch = sc(await call("list_threads", { view: "archive" }));
     ok(
       "archived thread leaves both inboxes",
       !prim.items.some((t: AnyResult) => t.id === threadId) &&
-        !otherPost.items.some((t: AnyResult) => t.id === threadId),
+        !otherAfterArchive.items.some((t: AnyResult) => t.id === threadId),
     );
     ok(
       "archived thread in archive view",

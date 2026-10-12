@@ -14,7 +14,7 @@ import {
 } from "react";
 import { avatarDataUrl, clerkProfileActions, DEFAULT_DEV_PROFILE, DEV_PROFILE_EVENT, DEV_PROFILE_KEY, profileNames, readDevProfile, validateAvatar, type ProfileFields } from "@/lib/ui/profile";
 
-export const DEV_AUTH = process.env.NEXT_PUBLIC_POST_DEV_AUTH === "1";
+export const DEV_AUTH = process.env.NEXT_PUBLIC_KITE_DEV_AUTH === "1";
 
 const convex = new ConvexReactClient(
   process.env.NEXT_PUBLIC_CONVEX_URL ?? "",

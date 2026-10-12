@@ -19,7 +19,7 @@ beforeEach(() => {
 
 test.each(["image/svg+xml", "text/html", "application/pdf"])("%s is downloaded, never served as an active inline document", async contentType => {
   mocks.download.mockResolvedValue({ filename: "attachment", contentType, size: 4, data: new ArrayBuffer(4) });
-  const response = await GET(new Request("https://post.test/api/attachments/m/a"), {
+  const response = await GET(new Request("https://kite.test/api/attachments/m/a"), {
     params: Promise.resolve({ messageId: "m", attachmentId: "a" }),
   });
   expect(response.headers.get("Content-Disposition")).toMatch(/^attachment;/);
@@ -30,7 +30,7 @@ test.each(["image/svg+xml", "text/html", "application/pdf"])("%s is downloaded, 
 
 test("safe raster images remain inline", async () => {
   mocks.download.mockResolvedValue({ filename: "photo.png", contentType: "image/png", size: 4, data: new ArrayBuffer(4) });
-  const response = await GET(new Request("https://post.test/api/attachments/m/a"), {
+  const response = await GET(new Request("https://kite.test/api/attachments/m/a"), {
     params: Promise.resolve({ messageId: "m", attachmentId: "a" }),
   });
   expect(response.headers.get("Content-Disposition")).toMatch(/^inline;/);

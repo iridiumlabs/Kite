@@ -1,7 +1,7 @@
 {
   "file": {
     "id": "01M4KK0MDZA86CZ4Y49K2YHAHF",
-    "name": "Post"
+    "name": "Kite"
   },
   "contentHash": {
     "tokens": "811c9dc5"
@@ -181,11 +181,11 @@
           <div className="flex items-center h-7 pr-2.5 pl-2 rounded-md gap-2.5 shrink-0">
             <div className="flex items-center justify-center shrink-0 rounded-lg bg-[#E3E3E8] size-4">
               <div className="flex font-sans font-bold text-[#48484A] text-[9px]/3">
-                P
+                K
               </div>
             </div>
             <div className="grow basis-[0%] font-sans text-[#1D1D1F] text-[13px]/4 line-clamp-1">
-              arham@postmail.app
+              arham@kitemail.app
             </div>
             <div className="font-sans text-[#8A8A8E] text-xs/4">
               3
@@ -246,7 +246,7 @@
               </div>
               <div className="flex items-center grow basis-[0%] min-w-0 gap-2">
                 <div className="shrink-0 w-max font-['Inter',system-ui,sans-serif] text-[#3A3A3C] text-[13px]/4">
-                  Re: Post beta onboarding feedback
+                  Re: Kite beta onboarding feedback
                 </div>
                 <div className="grow basis-[0%] min-w-0 font-['Inter',system-ui,sans-serif] text-[#8A8A8E] text-[13px]/4 line-clamp-1">
                   Went through the new import flow twice this morning. The OAuth step is so much smoother than the last build.
@@ -404,7 +404,7 @@
               </div>
               <div className="flex items-center grow basis-[0%] min-w-0 gap-2">
                 <div className="shrink-0 w-max font-sans text-[#3A3A3C] text-[13px]/4">
-                  [post/app] Fix thread grouping for forwarded messages (#214)
+                  [kite/app] Fix thread grouping for forwarded messages (#214)
                 </div>
                 <div className="grow basis-[0%] min-w-0 font-sans text-[#8A8A8E] text-[13px]/4 line-clamp-1">
                   @lena-dev approved these changes. Looks great, merging once CI is green.
@@ -454,7 +454,7 @@
               </div>
               <div className="flex items-center grow basis-[0%] min-w-0 gap-2">
                 <div className="shrink-0 w-max font-sans font-medium text-[#1D1D1F] text-[13px]/4">
-                  Re: Intro, Post × Halcyon
+                  Re: Intro, Kite × Halcyon
                 </div>
                 <div className="grow basis-[0%] min-w-0 font-sans text-[#8A8A8E] text-[13px]/4 line-clamp-1">
                   Thanks for the intro, Arham! I'd love to hear how you're thinking about shared inboxes.
@@ -509,7 +509,7 @@
               </div>
               <div className="flex items-center grow basis-[0%] min-w-0 gap-2">
                 <div className="shrink-0 w-max font-sans text-[#3A3A3C] text-[13px]/4">
-                  Deployment ready: post-web
+                  Deployment ready: kite-web
                 </div>
                 <div className="grow basis-[0%] min-w-0 font-sans text-[#8A8A8E] text-[13px]/4 line-clamp-1">
                   Production deployment for main (a3f9c21) completed in 41 seconds.
@@ -581,7 +581,7 @@
                   Podcast invite: Tools for Thought
                 </div>
                 <div className="grow basis-[0%] min-w-0 font-sans text-[#8A8A8E] text-[13px]/4 line-clamp-1">
-                  We're recording season three in November and would love to have you on to talk about Post.
+                  We're recording season three in November and would love to have you on to talk about Kite.
                 </div>
               </div>
               <div className="flex items-center justify-end w-42.5 shrink-0 gap-2.5">

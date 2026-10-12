@@ -40,9 +40,9 @@ describe("mcp route auth", () => {
     expect(res.headers.get("WWW-Authenticate")).toContain("Bearer");
   });
 
-  it("rejects a non-post_sk bearer and an unknown key", async () => {
+  it("rejects a non-kite_sk bearer and an unknown key", async () => {
     const handler = handlerWith(async () => null);
-    for (const tok of ["not-a-key", "post_sk_unknown"]) {
+    for (const tok of ["not-a-key", "kite_sk_unknown"]) {
       const res = await handler(
         new Request(URL, {
           method: "POST",
@@ -67,7 +67,7 @@ describe("mcp route auth", () => {
     }
   });
 
-  it("accepts a verified post_sk key and answers initialize", async () => {
+  it("accepts a verified kite_sk key and answers initialize", async () => {
     const seen: string[] = [];
     const handler = handlerWith(async (key) => {
       seen.push(key);
@@ -79,7 +79,7 @@ describe("mcp route auth", () => {
         headers: {
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
-          authorization: "Bearer post_sk_abc123",
+          authorization: "Bearer kite_sk_abc123",
         },
         body: JSON.stringify({
           jsonrpc: "2.0",
@@ -94,8 +94,9 @@ describe("mcp route auth", () => {
       }),
     );
     expect(res.status).toBe(200);
-    expect(seen).toEqual(["post_sk_abc123"]);
+    expect(seen).toEqual(["kite_sk_abc123"]);
     const body = await res.text();
-    expect(body).toContain("post");
+    expect(body).toContain('"name":"kite"');
+    expect(body).toContain('"title":"Kite Mail"');
   });
 });

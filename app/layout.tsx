@@ -13,8 +13,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Post",
-  description: "A personal email client",
+  title: "Kite",
+  applicationName: "Kite",
+  description: "Kite — a personal email client",
 };
 
 export default function RootLayout({

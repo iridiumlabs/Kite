@@ -53,7 +53,7 @@ export function toParsedMail(parsed: MpParsedMail): ParsedMail {
     "list-id",
     "precedence",
     "auto-submitted",
-    "x-post-draft-id",
+    "x-kite-draft-id",
     "reply-to",
     "date",
     "subject",

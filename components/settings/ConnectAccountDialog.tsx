@@ -72,7 +72,7 @@ export function ConnectAccountDialog({
             Connect account
           </Dialog.Title>
           <Dialog.Description className="text-tertiary text-[13px]/4.5 mt-1">
-            Post validates your mailbox over IMAP and SMTP before saving.
+            Kite validates your mailbox over IMAP and SMTP before saving.
           </Dialog.Description>
           <div className="flex flex-col gap-3 mt-4">
             <div>

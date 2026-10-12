@@ -56,7 +56,7 @@ async function waitFor(
 
 function createEtherealAccount(): Promise<Eth> {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ requestor: "post-ui-e2e", version: "1.0" });
+    const body = JSON.stringify({ requestor: "kite-ui-e2e", version: "1.0" });
     const req = require_("node:https").request(
       {
         hostname: "api.nodemailer.com",
@@ -101,7 +101,7 @@ async function rawMime(mail: Mail): Promise<Buffer> {
 
 const PDF_BYTES = Buffer.from(
   "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n" +
-    "2 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 40 40 Td (post ui e2e) Tj ET\n" +
+    "2 0 obj\n<< /Length 44 >>\nstream\nBT /F1 12 Tf 40 40 Td (kite ui e2e) Tj ET\n" +
     "endstream\nendobj\ntrailer\n<< /Size 3 /Root 1 0 R >>\n%%EOF\n",
 );
 const PNG_1PX = Buffer.from(
@@ -183,7 +183,7 @@ function seedMails(A: Eth): Mail[] {
       `${TAG} build 412 passed`,
       {
         headers: { Precedence: "bulk" },
-        text: "post/main build 412 finished green in 4m12s.",
+        text: "kite/main build 412 finished green in 4m12s.",
         messageId: `<${TAG}-9@x>`,
       },
     ),
@@ -534,7 +534,7 @@ async function main() {
     await subj.fill(`${TAG} outbound from ui`);
     await page
       .locator('[role="dialog"] .ProseMirror')
-      .fill("Sent from the Post UI e2e.");
+      .fill("Sent from the Kite UI e2e.");
     await page.setInputFiles('input[type="file"]', {
       name: "e2e-attach.pdf",
       mimeType: "application/pdf",
@@ -646,7 +646,7 @@ async function main() {
     await compose.locator("input").first().fill("scheduled-recipient@example.com");
     await compose.locator("input").first().press("Enter");
     await page.getByPlaceholder("Subject", { exact: true }).fill(`${TAG} scheduled from UI`);
-    await compose.locator(".ProseMirror").fill("Scheduled delivery from Post.");
+    await compose.locator(".ProseMirror").fill("Scheduled delivery from Kite.");
     await page.getByRole("button", { name: "Schedule send", exact: true }).click();
     const sendAt = new Date(Date.now() + 90_000);
     const localDate = new Date(sendAt.getTime() - sendAt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);

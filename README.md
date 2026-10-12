@@ -1,4 +1,4 @@
-# Post
+# Kite
 
 An Apple-inspired personal email client for multiple Spacemail IMAP/SMTP mailboxes. Built with Next.js 16, Clerk, Convex and Jev, with the same backend functions exposed through a remote MCP server.
 
@@ -14,7 +14,7 @@ Server-side mail connections are restricted to the exact Spacemail (`mail.spacem
 
 `EXPERIENTIAL_API_KEY` enables Jev classification. Without it, ingest uses deterministic Primary/Other heuristics and records classification for a bounded later retry. Retry category descriptions are captured at ingest, so subsequent category edits do not retroactively categorize old mail. Manual corrections take precedence over retries.
 
-See `AGENTS.md` for the architecture, data-I/O rules and local dev-auth harness. Dev auth is test-only. Never enable `POST_DEV_AUTH`, `NEXT_PUBLIC_POST_DEV_AUTH` or `POST_DEV_AUTH_ISSUER` in production.
+See `AGENTS.md` for the architecture, data-I/O rules and local dev-auth harness. Dev auth is test-only. Never enable `KITE_DEV_AUTH`, `NEXT_PUBLIC_KITE_DEV_AUTH` or `KITE_DEV_AUTH_ISSUER` in production.
 
 ## Profile and privacy
 
@@ -38,8 +38,10 @@ Opt-in live suites require a local Convex backend at `127.0.0.1:3210`. They crea
 - `npx tsx scripts/live-appearance.ts`: focused profile/Settings/palette appearance persistence across navigation, reloads and fresh browser contexts, plus the current-origin MCP URL. Requires the local dev-auth harness and restores the test user's original theme.
 - `npx tsx scripts/live-compose-controls.ts`: repeated Compose clicks, minimized-window restoration, preserved editor text and borderless-field/keyboard focus styling. Requires the local dev-auth harness; never sends mail and discards only its own test draft.
 - `npx tsx scripts/live-profile-settings.ts`: dev profile editing/avatar validation and removal, styled dropdown/keyboard dismissal, switch layout and phone Settings. Restores modified mail preferences and changes only its isolated browser-local dev profile; no email is sent.
-- `npx tsx scripts/live-mcp.ts`: real HTTP MCP tool coverage. Set `POST_MCP_URL=http://localhost:3000` to reuse an existing Next server. The default starts its own server and requires that no other Next dev process holds the project's dev lock.
-- `npx tsx scripts/screenshots.ts`: fresh `/dev/preview` captures in `artifacts/screens/`, compared with the Paper exports in `design/`.
+- `npx tsx scripts/live-mcp.ts`: real HTTP MCP tool coverage. Set `KITE_MCP_URL=http://localhost:3000` to reuse an existing Next server. The default starts its own server and requires that no other Next dev process holds the project's dev lock.
+- `npx tsx scripts/screenshots.ts`: fresh `/dev/preview` captures in `artifacts/screens/`; rebranded design references and refreshed screenshots are in `design/`.
+- `npx tsx scripts/live-branding.ts`: browser smoke checks for Kite metadata, favicons, fixture branding, dark/mobile previews and unauthenticated MCP rejection. Requires Next dev; no mailbox/backend is needed.
+- `npx tsx scripts/generate-icons.ts`: regenerate raster favicons and the Apple home-screen icon from `app/icon.svg`.
 
 Live wire, MCP and browser suites use separate test owners. Artifacts, backend state and environment files are ignored by Git. API keys are masked in new browser screenshots.
 
@@ -47,7 +49,7 @@ Live wire, MCP and browser suites use separate test owners. Artifacts, backend s
 
 Follow [the Vercel deployment guide](DEPLOYMENT.md) for ordered Clerk/Convex setup, environment variables, the build command, production checks and MCP client configuration.
 
-The MCP endpoint deploys with the app at `https://YOUR_HOST/api/mcp`. Settings displays the current site's origin, so localhost is expected while developing. Open Settings on your deployed site to get the production URL. Connect with a production `post_sk_` key using `Authorization: Bearer YOUR_KEY`. Post exposes 37 tools, including scheduled-send cancellation and explicit uncertain-delivery resolution. Keys are shown once, stored hashed, and can be revoked in Settings.
+The MCP endpoint deploys with the app at `https://YOUR_HOST/api/mcp`. Settings displays the current site's origin, so localhost is expected while developing. Open Settings on your deployed site to get the production URL. Connect with a production `kite_sk_` key using `Authorization: Bearer YOUR_KEY`. Kite exposes 37 tools, including scheduled-send cancellation and explicit uncertain-delivery resolution. Keys are shown once, stored hashed, and can be revoked in Settings.
 
 Ambiguous SMTP delivery locks the draft and send reservation to prevent accidental retries. After verifying delivery evidence, reopen the draft and explicitly confirm delivery (remove the stale draft) or non-delivery (unlock without sending). An empty Sent folder alone does not prove non-delivery; retrying may send duplicates. Active attempts remain locked; crashed attempts become resolvable after 15 minutes. MCP offers `list_uncertain_send_attempts` (by draft or account), `resolve_uncertain_draft`, and `resolve_uncertain_send` for draftless direct sends; explicit user confirmation and the selected reservation ID are required. A retry needs a new idempotency key. Known SMTP acceptance also has durable, SMTP-free recovery: if an action stops before finalization, a scheduled mutation files the accepted recipients and unlocks only rejected recipients after the action deadline.
 

@@ -86,7 +86,7 @@ function PreviewReader({ dark }: { dark: boolean }) {
   const [expanded] = useState(() => new Set(["m-3"]));
   return (
     <Reader
-      subject="Re: Post beta onboarding feedback"
+      subject="Re: Kite beta onboarding feedback"
       messageCount={3}
       accountEmail="arham@gmail.com"
       messages={FIXTURE_MESSAGES}

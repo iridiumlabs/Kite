@@ -667,7 +667,7 @@ export async function buildIngestArgs(
       classificationCategories: needsRetry ? categories : undefined,
       classifyAttempts: classified?.needsRetry ? 1 : 0,
       bulk: meta.bulk,
-      postDraftId: meta.postDraftId,
+      kiteDraftId: meta.kiteDraftId,
     });
   }
   return out;
@@ -849,7 +849,7 @@ async function docsInFolder(
   return await deps.store.messagesByUids(folder._id, uids);
 }
 
-// Links server-side drafts to Convex drafts (matched on X-Post-Draft-Id),
+// Links server-side drafts to Convex drafts (matched on X-Kite-Draft-Id),
 // imports foreign server drafts, and drops drafts whose remote copy is gone.
 async function syncRemoteDrafts(
   deps: EngineDeps,
@@ -865,15 +865,15 @@ async function syncRemoteDrafts(
   const docs = await deps.store.messagesByUids(draftsFolder._id, serverUidList);
   const serverByUid = new Map(docs.map((d) => [d.uid, d]));
 
-  const byPostId = new Map(drafts.map((d) => [d.messageIdHeader, d]));
+  const byKiteId = new Map(drafts.map((d) => [d.messageIdHeader, d]));
   const importedUids = new Set(drafts
     .filter(d => d.remoteFolderId === draftsFolder._id && d.remoteUid !== undefined)
     .map(d => d.remoteUid));
   let imported = 0;
   for (const d of docs) {
     if (d.uid === undefined) continue;
-    if (d.postDraftId && byPostId.has(d.postDraftId)) {
-      const draft = byPostId.get(d.postDraftId)!;
+    if (d.kiteDraftId && byKiteId.has(d.kiteDraftId)) {
+      const draft = byKiteId.get(d.kiteDraftId)!;
       if (
         !draft.remoteDirty &&
         (draft.remoteUid !== d.uid || draft.remoteFolderId !== draftsFolder._id)
@@ -882,7 +882,7 @@ async function syncRemoteDrafts(
       }
       continue;
     }
-    if (d.postDraftId) continue; // foreign Post draft owned by another client
+    if (d.kiteDraftId) continue; // foreign Kite draft owned by another client
     if (importedUids.has(d.uid)) continue;
     if (imported >= MAX_REMOTE_DRAFT_IMPORTS) continue;
     imported++;

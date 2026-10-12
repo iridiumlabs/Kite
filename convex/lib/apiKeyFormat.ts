@@ -2,7 +2,7 @@ import { sha256Hex } from "./idempotency";
 
 const BASE62 =
   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-export const API_KEY_PREFIX = "post_sk_";
+export const API_KEY_PREFIX = "kite_sk_";
 
 export function randomBase62(byteCount: number): string {
   const bytes = new Uint8Array(byteCount);

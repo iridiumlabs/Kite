@@ -344,7 +344,7 @@ export function MailApp() {
   // document title
   const primaryUnread = counts?.["unread:primary"] ?? 0;
   useEffect(() => {
-    document.title = primaryUnread > 0 ? `(${primaryUnread}) Post` : "Post";
+    document.title = primaryUnread > 0 ? `(${primaryUnread}) Kite` : "Kite";
   }, [primaryUnread]);
 
   // apply stored theme once
@@ -519,14 +519,14 @@ export function MailApp() {
     },
     onReply: () => {
       // handled inside reader; opens compose for latest message
-      const ev = new CustomEvent("post:reply");
+      const ev = new CustomEvent("kite:reply");
       window.dispatchEvent(ev);
     },
     onReplyAll: () => {
-      window.dispatchEvent(new CustomEvent("post:replyAll"));
+      window.dispatchEvent(new CustomEvent("kite:replyAll"));
     },
     onForward: () => {
-      window.dispatchEvent(new CustomEvent("post:forward"));
+      window.dispatchEvent(new CustomEvent("kite:forward"));
     },
     onCompose: () => ui.openCompose({ mode: "new" }),
     onSearch: () => ui.setPaletteOpen(true),
@@ -704,7 +704,7 @@ export function MailApp() {
       if (typeof localStorage === "undefined") {
         return { categories: false, accounts: false };
       }
-      const raw = localStorage.getItem("post.sidebar");
+      const raw = localStorage.getItem("kite.sidebar");
       if (raw) return JSON.parse(raw);
     } catch {}
     return { categories: false, accounts: false };
@@ -714,7 +714,7 @@ export function MailApp() {
       setCollapsed((prev: { categories: boolean; accounts: boolean }) => {
         const next = { ...prev, [section]: !prev[section] };
         try {
-          localStorage.setItem("post.sidebar", JSON.stringify(next));
+          localStorage.setItem("kite.sidebar", JSON.stringify(next));
         } catch {}
         return next;
       });
@@ -740,7 +740,7 @@ export function MailApp() {
           if (DEV_AUTH) {
             toast("Sign out is disabled in dev mode");
           } else {
-            window.dispatchEvent(new Event("post:signout"));
+            window.dispatchEvent(new Event("kite:signout"));
           }
         },
       }}
@@ -942,7 +942,7 @@ export function MailApp() {
             Connect your Spacemail mailbox
           </div>
           <div className="text-tertiary text-[13px]/4 max-w-80 text-center">
-            Post syncs your mail over IMAP and SMTP. Add your first account to
+            Kite syncs your mail over IMAP and SMTP. Add your first account to
             get started.
           </div>
           <button

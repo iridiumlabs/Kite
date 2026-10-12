@@ -58,7 +58,7 @@ const ingestMessageV = v.object({
   classificationCategories: v.optional(v.array(v.object({ id: v.id("categories"), name: v.string(), description: v.string() }))),
   classifyAttempts: v.optional(v.number()),
   bulk: v.optional(v.boolean()),
-  postDraftId: v.optional(v.string()),
+  kiteDraftId: v.optional(v.string()),
   sourceStorageId: v.optional(v.id("_storage")),
 });
 
@@ -215,7 +215,7 @@ export const messagesByUids = internalQuery({
           folderId: m.folderId,
           folderRole: m.folderRole,
           threadId: m.threadId,
-          postDraftId: m.postDraftId,
+          kiteDraftId: m.kiteDraftId,
           attachments: m.attachments,
         });
       }
@@ -243,7 +243,7 @@ export const messagesByMsgIds = internalQuery({
           folderId: m.folderId,
           folderRole: m.folderRole,
           threadId: m.threadId,
-          postDraftId: m.postDraftId,
+          kiteDraftId: m.kiteDraftId,
           attachments: m.attachments,
         });
       }

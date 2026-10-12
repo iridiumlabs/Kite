@@ -1,4 +1,4 @@
-// Response shaping for the Post MCP server: Convex docs -> stable wire
+// Response shaping for the Kite MCP server: Convex docs -> stable wire
 // shapes. Everything here is pure and dependency-free so it can be unit
 // tested under any runtime.
 

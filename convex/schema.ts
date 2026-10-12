@@ -201,7 +201,7 @@ export default defineSchema({
     classificationCategories: v.optional(v.array(v.object({ id: v.id("categories"), name: v.string(), description: v.string() }))),
     classifyAttempts: v.number(),
     bulk: v.boolean(),
-    postDraftId: v.optional(v.string()),
+    kiteDraftId: v.optional(v.string()),
     sourceStorageId: v.optional(v.id("_storage")),
     searchText: v.string(),
   })

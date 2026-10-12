@@ -8,7 +8,7 @@ import {
   type MessageContent,
   type MessageDoc,
 } from "../format";
-import type { PostBackend as Backend } from "../backend";
+import type { KiteBackend as Backend } from "../backend";
 import {
   addTool,
   okResult,
@@ -398,7 +398,7 @@ export function registerReadingTools(server: McpServer, getBackend: BackendFor) 
           {
             type: "resource" as const,
             resource: {
-              uri: `post://attachment/${args.messageId}/${args.attachmentId}`,
+              uri: `kite://attachment/${args.messageId}/${args.attachmentId}`,
               mimeType: att.contentType,
               blob: data,
             },

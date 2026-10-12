@@ -72,7 +72,7 @@ async function main() {
     await page.waitForTimeout(600);
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLIFrameElement>("iframe.body-frame")].every(frame => {
       const doc = frame.contentDocument;
-      return !!doc?.getElementById("post-fonts") && doc.fonts.status === "loaded" &&
+      return !!doc?.getElementById("kite-fonts") && doc.fonts.status === "loaded" &&
         frame.getBoundingClientRect().height + 1 >= doc.body.scrollHeight;
     }));
     const file = path.join(OUT, `${s.name}.png`);

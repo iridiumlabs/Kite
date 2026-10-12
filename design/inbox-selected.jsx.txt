@@ -1,7 +1,7 @@
 {
   "file": {
     "id": "01M4KK0MDZA86CZ4Y49K2YHAHF",
-    "name": "Post"
+    "name": "Kite"
   },
   "contentHash": {
     "tokens": "811c9dc5"
@@ -181,11 +181,11 @@
           <div className="flex items-center h-7 pr-2.5 pl-2 rounded-md gap-2.5 shrink-0">
             <div className="flex items-center justify-center shrink-0 rounded-lg bg-[#E3E3E8] size-4">
               <div className="flex font-sans font-bold text-[#48484A] text-[9px]/3">
-                P
+                K
               </div>
             </div>
             <div className="grow basis-[0%] font-sans text-[#1D1D1F] text-[13px]/4 line-clamp-1">
-              arham@postmail.app
+              arham@kitemail.app
             </div>
             <div className="font-sans text-[#8A8A8E] text-xs/4">
               3
@@ -245,7 +245,7 @@
                 </div>
               </div>
               <div className="font-sans text-[#1D1D1F] text-[13px]/4 line-clamp-1">
-                Re: Post beta onboarding feedback
+                Re: Kite beta onboarding feedback
               </div>
               <div className="font-sans text-[#6E6E73] text-[13px]/4 line-clamp-1">
                 Went through the new import flow twice this morning. The OAuth step is so much smoother
@@ -337,7 +337,7 @@
                 </div>
               </div>
               <div className="font-sans text-[#3A3A3C] text-[13px]/4 line-clamp-1">
-                [post/app] Fix thread grouping for forwarded messages (#214)
+                [kite/app] Fix thread grouping for forwarded messages (#214)
               </div>
               <div className="font-sans text-[#8A8A8E] text-[13px]/4 line-clamp-1">
                 @lena-dev approved these changes. Looks great, merging once CI is green.
@@ -383,7 +383,7 @@
                 </div>
               </div>
               <div className="font-sans font-medium text-[#1D1D1F] text-[13px]/4 line-clamp-1">
-                Re: Intro, Post × Halcyon
+                Re: Intro, Kite × Halcyon
               </div>
               <div className="font-sans text-[#8A8A8E] text-[13px]/4 line-clamp-1">
                 Thanks for the intro, Arham! I'd love to hear how you're thinking about shared inboxes.
@@ -402,7 +402,7 @@
                 </div>
               </div>
               <div className="font-sans text-[#3A3A3C] text-[13px]/4 line-clamp-1">
-                Deployment ready: post-web
+                Deployment ready: kite-web
               </div>
               <div className="font-sans text-[#8A8A8E] text-[13px]/4 line-clamp-1">
                 Production deployment for main (a3f9c21) completed in 41 seconds.
@@ -518,7 +518,7 @@
         <div className="flex flex-col pt-3.5 pb-10 px-14">
           <div className="flex flex-col pb-5.5 gap-1.5">
             <div className="tracking-[-0.021em] font-['Inter',system-ui,sans-serif] font-bold text-[#1D1D1F] text-[22px]/7">
-              Re: Post beta onboarding feedback
+              Re: Kite beta onboarding feedback
             </div>
             <div className="flex items-center gap-1.5">
               <div className="font-['Inter',system-ui,sans-serif] text-[#8A8A8E] text-xs/4">

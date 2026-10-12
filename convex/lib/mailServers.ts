@@ -1,6 +1,6 @@
 type Protocol = "imap" | "smtp";
 
-// Post supports Spacemail; Ethereal is the public service used by live tests.
+// Kite supports Spacemail; Ethereal is the public service used by live tests.
 // Exact trusted hostnames avoid attacker-controlled DNS and private-network
 // destinations. Do not replace this with suffix matching or user allowlists.
 const HOSTS: Record<Protocol, ReadonlySet<string>> = {

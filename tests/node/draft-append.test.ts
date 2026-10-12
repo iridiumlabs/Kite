@@ -31,7 +31,7 @@ test("no APPENDUID is resolved before recording clean and cleans earlier copies"
   h.search.mockResolvedValue([3, 9, 10]);
   const { run, mutation } = setup(true, 2);
   expect(await run()).toEqual({ uid: 10 });
-  expect(h.search).toHaveBeenCalledWith("Drafts", "X-Post-Draft-Id", "draft@x");
+  expect(h.search).toHaveBeenCalledWith("Drafts", "X-Kite-Draft-Id", "draft@x");
   expect(mutation.mock.calls[1][1]).toMatchObject({ uid: 10 });
   expect(h.expunge).toHaveBeenCalledWith("Drafts", [3, 9, 2], true);
 });
