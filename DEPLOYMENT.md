@@ -51,7 +51,7 @@ Generate a **Production Deploy Key** in the production deployment's settings, wi
 
 Import this repository, choose the Next.js framework preset, use the repository root, and use a supported Node.js version (Node 24 was used for local verification). Installation is `npm ci`.
 
-Ensure Vercel's Production Branch contains the completed app changes. Git deployments require committed, published code; Vercel cannot deploy local-only edits or commits.
+Set Vercel's Production Branch to `main` and ensure it contains the completed app changes. Git deployments require committed, published code; Vercel cannot deploy local-only edits or commits.
 
 Set these Vercel environment variables for **Production**:
 
@@ -61,7 +61,7 @@ Set these Vercel environment variables for **Production**:
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk production publishable key |
 | `CLERK_SECRET_KEY` | Clerk production secret key |
 
-Override the Vercel **Build Command** with:
+The committed `vercel.json` sets the Next.js framework preset, `npm ci` install command, and this **Build Command** automatically; no dashboard command override is needed:
 
 ```sh
 npx convex deploy --cmd-url-env-var-name NEXT_PUBLIC_CONVEX_URL --cmd "npm run build"
