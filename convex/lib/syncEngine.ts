@@ -787,19 +787,23 @@ async function handleUidValidityReset(
   categories: { id: string; name: string; description: string }[],
   outcome: SyncOutcome,
 ) {
-  const byMsgId = new Map<string, FetchedMeta>();
-  for (const m of metas) byMsgId.set(m.messageIdHeader, m);
+  const byMsgId = new Map<string, FetchedMeta[]>();
+  for (const m of metas) {
+    const copies = byMsgId.get(m.messageIdHeader) ?? [];
+    copies.push(m);
+    byMsgId.set(m.messageIdHeader, copies);
+  }
 
   const docs = await docsInFolder(deps, folder);
-  const keep = new Set<string>();
+  const matchedUids = new Set<number>();
   for (const d of docs) {
-    if (!byMsgId.has(d.messageIdHeader)) {
+    const meta = byMsgId.get(d.messageIdHeader)?.shift();
+    if (!meta) {
       await deps.store.deleteMessages([d._id]);
       outcome.vanished++;
       continue;
     }
-    keep.add(d.messageIdHeader);
-    const meta = byMsgId.get(d.messageIdHeader)!;
+    matchedUids.add(meta.uid);
     if (d.uid !== meta.uid) {
       await deps.store.relocateMessages([
         {
@@ -815,7 +819,7 @@ async function handleUidValidityReset(
   fs.synced = [];
   fs.masks = new Map();
 
-  const newMetas = metas.filter((m) => !keep.has(m.messageIdHeader));
+  const newMetas = metas.filter((m) => !matchedUids.has(m.uid));
   const owner = { addresses: ownerAddresses };
   const args = await buildIngestArgs(
     deps,

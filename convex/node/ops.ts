@@ -8,6 +8,7 @@ import { connectImap, FlowPort, accountToImapConfig } from "./imap";
 import { MailParserPort } from "./mailParser";
 import { makeStorePort } from "./store";
 import { decryptCredentials } from "./crypto";
+import { LeaseLostError, startLeaseHeartbeat } from "./lease";
 
 const LEASE_TTL_MS = 2 * 60 * 1000;
 
@@ -23,6 +24,7 @@ export const processOps = internalAction({
     let processed = 0;
     for (const accountId of accountIds as Id<"accounts">[]) {
       const owner = crypto.randomUUID();
+      const startedAt = Date.now();
       try {
         await ctx.runMutation(internal.syncStore.acquireLease, {
           accountId,
@@ -32,11 +34,13 @@ export const processOps = internalAction({
       } catch {
         continue;
       }
+      const lease = startLeaseHeartbeat(ctx, { accountId, owner, ttlMs: LEASE_TTL_MS, startedAt });
+      const leasedCtx = lease.guard(ctx);
       try {
-        const secret = await ctx.runQuery(internal.syncStore.getSecret, {
+        const secret = await leasedCtx.runQuery(internal.syncStore.getSecret, {
           accountId,
         });
-        const state = await ctx.runQuery(
+        const state = await leasedCtx.runQuery(
           internal.syncStore.getAccountSyncState,
           { accountId },
         );
@@ -44,37 +48,42 @@ export const processOps = internalAction({
         const { username, password } = decryptCredentials(secret);
         const cfg = accountToImapConfig(state.account);
         const client = await connectImap({ ...cfg, username, password });
+        lease.onLost(() => client.close());
         try {
-          await ctx.runMutation(internal.syncStore.clearOpsBackoff, { accountId });
+          lease.assertHeld();
+          await leasedCtx.runMutation(internal.syncStore.clearOpsBackoff, { accountId });
           const imap = new FlowPort(client);
           const deps = {
             accountId: accountId as string,
             imap,
-            store: makeStorePort(ctx, accountId),
+            store: makeStorePort(leasedCtx, accountId),
             parser: new MailParserPort(),
             classify: null,
             now: () => Date.now(),
             log: (msg: string) => console.log(`[ops ${accountId}] ${msg}`),
             pushDraftRemote: async (draftId: string) => {
-              const res = await ctx.runAction(
-                internal.node.draftsOps.pushDraftNow,
-                { draftId: draftId as Id<"drafts"> },
+              const res = await leasedCtx.runAction(
+                internal.node.draftsOps.pushDraftUnderLease,
+                { draftId: draftId as Id<"drafts">, leaseOwner: owner, leaseTtlMs: LEASE_TTL_MS },
               );
               return { uid: res.uid };
             },
           };
-          processed += await runPendingOps(deps);
+          const count = await runPendingOps(deps);
+          lease.assertHeld();
+          processed += count;
         } finally {
           await client.logout().catch(() => client.close());
         }
       } catch (error) {
         // A bad connection must not abort the sweep or consume each message's
         // retry budget. Account-level backoff also removes it from discovery.
-        await ctx.runMutation(internal.syncStore.backoffAccountOps, {
+        if (!(error instanceof LeaseLostError)) await ctx.runMutation(internal.syncStore.backoffAccountOps, {
           accountId, now: Date.now(),
           error: error instanceof Error ? error.message : "IMAP connection failed",
         }).catch(err => console.error(`[ops ${accountId}] could not persist backoff`, err));
       } finally {
+        await lease.stop();
         await ctx.runMutation(internal.syncStore.releaseLease, {
           accountId,
           owner,

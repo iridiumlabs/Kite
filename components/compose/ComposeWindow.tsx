@@ -26,11 +26,13 @@ export interface RecipientChip {
 }
 
 export interface ComposeAttachment {
+  id?: string;
   uploadId?: string;
   filename: string;
   contentType: string;
   size: number;
   uploading?: boolean;
+  removing?: boolean;
   progress?: number;
 }
 
@@ -129,7 +131,9 @@ export function AttachmentChip({
           {att.filename}
         </div>
         <div className="tnum text-tertiary text-[11px]/3.5">
-          {att.uploading
+          {att.removing
+            ? "Removing…"
+            : att.uploading
             ? `Uploading… ${Math.round((att.progress ?? 0) * 100)}%`
             : formatBytes(att.size)}
         </div>
@@ -364,7 +368,7 @@ export function ComposeWindow(p: ComposeWindowProps) {
               key={i}
               att={a}
               onRemove={
-                p.onRemoveAttachment && !a.uploading
+                p.onRemoveAttachment && !a.uploading && !a.removing
                   ? () => p.onRemoveAttachment?.(i)
                   : undefined
               }

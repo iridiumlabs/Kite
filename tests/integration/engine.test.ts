@@ -767,6 +767,21 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     ).toHaveLength(0);
   });
 
+  test.each([[2, 3], [3, 2]])("UIDVALIDITY reset preserves duplicate copies one-to-one (%s to %s)", async (oldCount, newCount) => {
+    const { t, imap, deps } = await world();
+    for (let i = 0; i < oldCount; i++) imap.mailbox("INBOX").append(mailSource({ id: "duplicate@t" }));
+    await runAccountSync(deps);
+    const originalIds = new Set((await allMessages(t)).map(m => m._id));
+    imap.serverRenumber("INBOX", 42, Array.from({ length: newCount }, () => mailSource({ id: "duplicate@t" })));
+    await runAccountSync(deps);
+    const messages = await allMessages(t);
+    expect(messages).toHaveLength(newCount);
+    expect(new Set(messages.map(m => m.uid)).size).toBe(newCount);
+    expect(messages.filter(m => originalIds.has(m._id))).toHaveLength(Math.min(oldCount, newCount));
+    await runAccountSync(deps);
+    expect(await allMessages(t)).toHaveLength(newCount);
+  });
+
   test("UIDVALIDITY change remaps by Message-ID and drops the missing", async () => {
     const { t, accountId, imap, deps } = await world();
     const keepSrc = mailSource({ id: "keep@t", subject: "still here" });

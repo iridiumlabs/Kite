@@ -98,10 +98,10 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-function attach() {
+function attach(name = "new.txt") {
   const input = (render().props as { children: ReactElement[] }).children[1];
   const onChange = (input.props as { onChange: (e: unknown) => void }).onChange;
-  onChange({ target: { files: [new File(["upload"], "new.txt", { type: "text/plain" })], value: "new.txt" } });
+  onChange({ target: { files: [new File(["upload"], name, { type: "text/plain" })], value: name } });
 }
 
 test("forward loading cannot shift the upload completion target", async () => {
@@ -116,6 +116,27 @@ test("forward loading cannot shift the upload completion target", async () => {
   await settle();
   expect(props().attachments).toMatchObject([{ filename: "original.txt" }, { filename: "new.txt", uploading: false }]);
   expect(h.mutations.get("drafts:addAttachment")).toHaveBeenCalledOnce();
+});
+
+test("out-of-order uploads remove by stable ID, not backend completion position", async () => {
+  h.content.mockResolvedValue({ attachments: [] });
+  h.effects = []; h.refs = []; render(); render(); await settle();
+  const first = deferred<unknown>(); const second = deferred<unknown>();
+  vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise));
+  attach("first.txt"); await settle();
+  attach("second.txt"); await settle();
+  second.resolve({ ok: true, json: async () => ({ storageId: "second-storage" }) }); await settle();
+  first.resolve({ ok: true, json: async () => ({ storageId: "first-storage" }) }); await settle();
+  const rows = props().attachments;
+  expect(rows.map(a => a.filename)).toEqual(["first.txt", "second.txt"]);
+  const adds = h.mutations.get("drafts:addAttachment")!;
+  expect(adds.mock.calls.map(([args]) => args.attachment.id)).toEqual([rows[1].id, rows[0].id]);
+  const remove = deferred<void>(); h.mutations.get("drafts:removeAttachment")!.mockReturnValue(remove.promise);
+  props().onRemoveAttachment!(0); await settle();
+  expect(props().sendDisabled).toBe(true);
+  expect(h.mutations.get("drafts:removeAttachment")).toHaveBeenCalledWith({ draftId: "draft", attachmentId: rows[0].id });
+  remove.resolve(); await settle();
+  expect(props().attachments.map(a => a.id)).toEqual([rows[1].id]);
 });
 
 test("a failed upload after forward loading removes only that upload", async () => {

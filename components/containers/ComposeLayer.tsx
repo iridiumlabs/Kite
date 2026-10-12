@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { ChevronsUpDown } from "@/components/icons";
 import { getCached } from "@/lib/ui/contentCache";
+import { draftAttachmentId } from "@/convex/lib/draftAttachment";
 import { replyRecipients, replySubjectFor, forwardSubjectFor, htmlToText } from "@/convex/lib/compose";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -380,6 +381,7 @@ function ComposePane({
       setAccountId(existingDraft.accountId);
       setAttachments(
         existingDraft.attachments.map((a) => ({
+          id: draftAttachmentId(a),
           filename: a.filename,
           contentType: a.contentType,
           size: a.size,
@@ -456,6 +458,7 @@ function ComposePane({
         setAttachments((prev) => [
           ...prev,
           ...atts.map((a) => ({
+            id: draftAttachmentId({ kind: "forward", messageId: win.replyToMessageId!, attachmentId: a.id }),
             filename: a.filename,
             contentType: a.contentType,
             size: a.size,
@@ -521,6 +524,7 @@ function ComposePane({
             win.mode === "forward" && win.replyToMessageId
               ? forwardAttsRef.current.map((a) => ({
                   kind: "forward" as const,
+                  id: draftAttachmentId({ kind: "forward", messageId: win.replyToMessageId!, attachmentId: a.id }),
                   messageId: win.replyToMessageId as Id<"messages">,
                   attachmentId: a.id,
                   filename: a.filename,
@@ -611,6 +615,7 @@ function ComposePane({
       setAttachments((prev) => [
         ...prev,
         {
+          id: uploadId,
           uploadId,
           filename: file.name,
           contentType: file.type || "application/octet-stream",
@@ -634,6 +639,7 @@ function ComposePane({
           draftId: id,
           attachment: {
             kind: "upload",
+            id: uploadId,
             storageId,
             filename: file.name,
             contentType: file.type || "application/octet-stream",
@@ -659,8 +665,8 @@ function ComposePane({
       toast.error("Add a recipient first");
       return;
     }
-    if (attachments.some(a => a.uploading)) {
-      toast.error("Wait for attachments to finish uploading");
+    if (attachments.some(a => a.uploading || a.removing)) {
+      toast.error("Wait for attachment changes to finish");
       return;
     }
     if ([...to, ...cc, ...bcc].some((c) => c.invalid)) {
@@ -704,8 +710,8 @@ function ComposePane({
       toast.error("Add a recipient first");
       return;
     }
-    if (attachments.some((a) => a.uploading)) {
-      toast.error("Wait for attachments to finish uploading");
+    if (attachments.some((a) => a.uploading || a.removing)) {
+      toast.error("Wait for attachment changes to finish");
       return;
     }
     if ([...to, ...cc, ...bcc].some((c) => c.invalid)) {
@@ -913,12 +919,18 @@ function ComposePane({
         quoted={quoteText ? <QuotedPreview text={quoteText} /> : undefined}
         attachments={attachments}
         onRemoveAttachment={async (i) => {
-          setAttachments((prev) => prev.filter((_, j) => j !== i));
-          if (draftIdRef.current) {
-            await removeAttachment({
-              draftId: draftIdRef.current,
-              index: i,
-            }).catch(() => {});
+          const attachment = attachments[i];
+          if (!attachment?.id || attachment.uploading || attachment.removing) return;
+          setAttachments(prev => prev.map(a => a.id === attachment.id ? { ...a, removing: true } : a));
+          try {
+            const draftId = await save();
+            if (!draftId || discardedRef.current) return;
+            await removeAttachment({ draftId, attachmentId: attachment.id });
+            setAttachments(prev => prev.filter(a => a.id !== attachment.id));
+          } catch {
+            toast.error(`Could not remove ${attachment.filename}`);
+          } finally {
+            setAttachments(prev => prev.map(a => a.id === attachment.id ? { ...a, removing: false } : a));
           }
         }}
         formatBar={formatOpen ? <FormatBar editor={editor} /> : undefined}
@@ -942,7 +954,7 @@ function ComposePane({
         onToggleFormat={() => setFormatOpen((v) => !v)}
         formatOpen={formatOpen}
         onDiscard={() => void onDiscard()}
-        sendDisabled={accounts.length === 0 || existingDraft?.status === "uncertain" || existingDraft?.status === "sending"}
+        sendDisabled={accounts.length === 0 || attachments.some(a => a.uploading || a.removing) || existingDraft?.status === "uncertain" || existingDraft?.status === "sending"}
       />
       <input
         ref={fileInput}

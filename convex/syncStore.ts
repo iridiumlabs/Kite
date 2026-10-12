@@ -10,6 +10,7 @@ import { internal } from "./_generated/api";
 import { ingestMessage } from "./model/ingest";
 import { recomputeThread } from "./model/threads";
 import { addressV } from "./validators";
+import { draftAttachmentId } from "./lib/draftAttachment";
 import { enqueueOp, migrateOps, refreshAccountOps, refreshTargetQueue } from "./model/pendingOps";
 
 const ingestMessageV = v.object({
@@ -876,7 +877,7 @@ export const materializeDraftAttachments = internalMutation({
         const upload = args.uploads.find(u => u.messageId === att.messageId && u.attachmentId === att.attachmentId);
         if (!upload) return att;
         used.add(upload.storageId);
-        return { kind: "upload" as const, storageId: upload.storageId, filename: att.filename, contentType: att.contentType, size: upload.size };
+        return { kind: "upload" as const, id: draftAttachmentId(att), storageId: upload.storageId, filename: att.filename, contentType: att.contentType, size: upload.size };
       });
       // Preserve edits made during download, including added/removed files.
       await ctx.db.patch(draft._id, { attachments });
@@ -968,6 +969,7 @@ async function bumpCounter(
 const draftAttachmentV = v.union(
   v.object({
     kind: v.literal("upload"),
+    id: v.optional(v.string()),
     storageId: v.id("_storage"),
     filename: v.string(),
     contentType: v.string(),
@@ -975,6 +977,7 @@ const draftAttachmentV = v.union(
   }),
   v.object({
     kind: v.literal("forward"),
+    id: v.optional(v.string()),
     messageId: v.id("messages"),
     attachmentId: v.string(),
     filename: v.string(),
@@ -1044,7 +1047,7 @@ export const importRemoteDraft = internalMutation({
       subject: args.subject,
       html: args.html,
       text: args.text,
-      attachments: args.attachments,
+      attachments: args.attachments.map(a => ({ ...a, id: a.id ?? crypto.randomUUID() })),
       messageIdHeader: args.messageIdHeader,
       status: "editing",
       remoteFolderId: args.remoteFolderId,

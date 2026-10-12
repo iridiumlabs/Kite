@@ -275,6 +275,7 @@ export default defineSchema({
       v.union(
         v.object({
           kind: v.literal("upload"),
+          id: v.optional(v.string()),
           storageId: v.id("_storage"),
           filename: v.string(),
           contentType: v.string(),
@@ -282,6 +283,7 @@ export default defineSchema({
         }),
         v.object({
           kind: v.literal("forward"),
+          id: v.optional(v.string()),
           messageId: v.id("messages"),
           attachmentId: v.string(),
           filename: v.string(),

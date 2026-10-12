@@ -169,7 +169,7 @@ function ConnectionsTab({
       await update({
         accountId: a.id as Id<"accounts">,
         displayName: name || undefined,
-        signatureHtml: signature || undefined,
+        signatureHtml: signature,
       });
       if (password) {
         await updateCreds({
@@ -274,7 +274,7 @@ function ConnectionsTab({
                 onClick={() => {
                   setEditing(a.id);
                   setName(a.displayName ?? "");
-                  setSignature("");
+                  setSignature(a.signatureHtml ?? "");
                   setPassword("");
                 }}
                 className="pressable h-7 px-2.5 rounded-md text-xs/4 font-medium bg-search-field text-primary"

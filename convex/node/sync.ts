@@ -17,6 +17,7 @@ import { MailParserPort } from "./mailParser";
 import { makeStorePort } from "./store";
 import { decryptCredentials } from "./crypto";
 import { classifierOrNull } from "./classify";
+import { LeaseLostError, startLeaseHeartbeat } from "./lease";
 
 const LEASE_TTL_MS = 4 * 60 * 1000;
 const BACKOFF_BASE_MS = 60 * 1000;
@@ -53,6 +54,7 @@ export function makeEngineDeps(
   ctx: ActionCtx,
   accountId: Id<"accounts">,
   imap: FlowPort,
+  leaseOwner?: string,
 ): EngineDeps {
   return {
     accountId: accountId as string,
@@ -65,6 +67,7 @@ export function makeEngineDeps(
     pushDraftRemote: async (draftId) => {
       const res = await ctx.runAction(internal.node.draftsOps.pushDraftUnderLease, {
         draftId: draftId as Id<"drafts">,
+        leaseOwner,
       });
       return { uid: res.uid };
     },
@@ -75,6 +78,7 @@ export const syncAccount = internalAction({
   args: { accountId: v.id("accounts") },
   handler: async (ctx, args) => {
     const owner = crypto.randomUUID();
+    const startedAt = Date.now();
     try {
       await ctx.runMutation(internal.syncStore.acquireLease, {
         accountId: args.accountId,
@@ -85,11 +89,16 @@ export const syncAccount = internalAction({
       return { skipped: "locked" };
     }
 
+    const originalCtx = ctx;
+    const lease = startLeaseHeartbeat(ctx, { accountId: args.accountId, owner, ttlMs: LEASE_TTL_MS, startedAt });
+    ctx = lease.guard(ctx);
     try {
       const imap = await openImap(ctx, args.accountId);
       if (!imap) return { skipped: "no-account" };
+      lease.onLost(() => imap.client.close());
       try {
-        const deps = makeEngineDeps(ctx, args.accountId, imap);
+        lease.assertHeld();
+        const deps = makeEngineDeps(ctx, args.accountId, imap, owner);
         // A verified sync connection also recovers a previously offline
         // operation queue without waiting for its account backoff to expire.
         await ctx.runMutation(internal.syncStore.clearOpsBackoff, { accountId: args.accountId });
@@ -109,6 +118,7 @@ export const syncAccount = internalAction({
         await imap.close();
       }
     } catch (err) {
+      if (err instanceof LeaseLostError) return { skipped: "lost-lease" };
       const failCount =
         ((await ctx.runQuery(internal.syncStore.getAccountSyncState, {
           accountId: args.accountId,
@@ -131,7 +141,8 @@ export const syncAccount = internalAction({
       });
       return { error: auth ? "auth_error" : "sync_error" };
     } finally {
-      await ctx.runMutation(internal.syncStore.releaseLease, {
+      await lease.stop();
+      await originalCtx.runMutation(internal.syncStore.releaseLease, {
         accountId: args.accountId,
         owner,
       });

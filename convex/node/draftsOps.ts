@@ -3,6 +3,7 @@
 import { v } from "convex/values";
 import { internalAction, type ActionCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
+import { startLeaseHeartbeat } from "./lease";
 import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import { connectImap, FlowPort, accountToImapConfig } from "./imap";
 import { decryptCredentials } from "./crypto";
@@ -81,94 +82,107 @@ export const pushDraftNow = internalAction({
     const draft = await ctx.runQuery(internal.syncStore.draftById, args);
     if (!draft || !draft.remoteDirty || draft.status === "sending" || draft.status === "uncertain") return { uid: draft?.remoteUid };
     const owner = crypto.randomUUID();
+    const startedAt = Date.now();
     try {
       await ctx.runMutation(internal.syncStore.acquireLease, { accountId: draft.accountId, owner, ttlMs: 240_000 });
     } catch {
       await ctx.scheduler.runAfter(30_000, internal.node.draftsOps.pushDraftNow, args);
       return { uid: draft.remoteUid };
     }
-    try { return await ctx.runAction(internal.node.draftsOps.pushDraftUnderLease, args); }
+    const lease = startLeaseHeartbeat(ctx, { accountId: draft.accountId, owner, ttlMs: 240_000, startedAt });
+    try { return await lease.guard(ctx).runAction(internal.node.draftsOps.pushDraftUnderLease, { ...args, leaseOwner: owner }); }
     catch (error) {
       // Transfer failed scheduled pushes to the durable, bounded ops queue.
       await ctx.runMutation(internal.syncStore.retryDraftPush, args);
       throw error;
     }
-    finally { await ctx.runMutation(internal.syncStore.releaseLease, { accountId: draft.accountId, owner }); }
+    finally {
+      await lease.stop();
+      await ctx.runMutation(internal.syncStore.releaseLease, { accountId: draft.accountId, owner });
+    }
   },
 });
 
 // Also called by the sync engine, which already owns the account lease.
 export const pushDraftUnderLease = internalAction({
-  args: { draftId: v.id("drafts") },
+  args: { draftId: v.id("drafts"), leaseOwner: v.optional(v.string()), leaseTtlMs: v.optional(v.number()) },
   handler: async (ctx, args): Promise<{ uid: number | undefined }> => {
     let draft: Doc<"drafts"> | null = await ctx.runQuery(
       internal.syncStore.draftById,
       { draftId: args.draftId },
     );
     if (!draft || !draft.remoteDirty || draft.status === "sending" || draft.status === "uncertain") return { uid: draft?.remoteUid };
-    const account: Doc<"accounts"> | null = await ctx.runQuery(
-      internal.syncStore.getAccountDoc,
-      { accountId: draft.accountId },
-    );
-    const secret = await ctx.runQuery(internal.syncStore.getSecret, {
-      accountId: draft.accountId,
-    });
-    if (!account || !secret) throw new Error("Draft account credentials are unavailable");
-    const { username, password } = decryptCredentials(secret);
-    const cfg = accountToImapConfig(account);
-    const client = await connectImap({ ...cfg, username, password });
+    const lease = args.leaseOwner ? startLeaseHeartbeat(ctx, {
+      accountId: draft.accountId, owner: args.leaseOwner, ttlMs: args.leaseTtlMs ?? 240_000,
+    }) : undefined;
+    if (lease) ctx = lease.guard(ctx);
     try {
-      const port = new FlowPort(client);
-      draft = await materializeDraftAttachments(ctx, draft);
-      if (!draft) return { uid: undefined };
-      const source = await buildDraftSource(ctx, draft, account);
-      const draftsState = await ctx.runQuery(
-        internal.syncStore.folderByRole,
-        { accountId: draft.accountId, role: "drafts" },
+      const account: Doc<"accounts"> | null = await ctx.runQuery(
+        internal.syncStore.getAccountDoc,
+        { accountId: draft.accountId },
       );
-      const draftsPath = draftsState?.path ?? "Drafts";
-      if (!draftsState) await port.createMailbox("Drafts");
-      const appended = await port.append(
-        draftsPath,
-        source,
-        ["\\Draft", "\\Seen"],
-        new Date(draft.updatedAt),
-      );
-      // APPENDUID is optional. Resolve the newest copy before marking clean,
-      // and collect prior copies left by an interrupted/lost APPEND response.
-      const copies = await port.searchHeader(draftsPath, "X-Post-Draft-Id", draft.messageIdHeader);
-      const uid = appended.uid ?? (copies.length ? Math.max(...copies) : undefined);
-      if (uid === undefined) throw new Error("Draft APPEND could not be reconciled");
-      const prevUid: number | undefined = draft.remoteUid;
-      const folderId = await ctx.runMutation(internal.syncStore.upsertFolder, {
+      const secret = await ctx.runQuery(internal.syncStore.getSecret, {
         accountId: draft.accountId,
-        path: draftsPath,
-        role: "drafts",
       });
-      const recorded = await ctx.runMutation(internal.syncStore.markDraftPushed, {
-        draftId: args.draftId,
-        folderId,
-        uid,
-        pushedUpdatedAt: draft.updatedAt,
-        pushedAccountId: draft.accountId,
-      });
-      if (!recorded && uid !== undefined) {
-        // The draft was sent or discarded while APPEND was in flight.
-        await port.expunge(draftsPath, [...new Set([...copies, uid])], true);
-        return { uid: undefined };
-      }
-      const obsolete = [...new Set([...copies, ...(prevUid !== undefined ? [prevUid] : [])])].filter(old => old !== uid);
-      if (obsolete.length) {
-        try {
-          await port.expunge(draftsPath, obsolete, true);
-        } catch {
-          // The old remote copy will be cleaned on the next sync.
+      if (!account || !secret) throw new Error("Draft account credentials are unavailable");
+      const { username, password } = decryptCredentials(secret);
+      const cfg = accountToImapConfig(account);
+      const client = await connectImap({ ...cfg, username, password });
+      lease?.onLost(() => client.close());
+      try {
+        lease?.assertHeld();
+        const port = new FlowPort(client);
+        draft = await materializeDraftAttachments(ctx, draft);
+        if (!draft) return { uid: undefined };
+        const source = await buildDraftSource(ctx, draft, account);
+        const draftsState = await ctx.runQuery(
+          internal.syncStore.folderByRole,
+          { accountId: draft.accountId, role: "drafts" },
+        );
+        const draftsPath = draftsState?.path ?? "Drafts";
+        if (!draftsState) await port.createMailbox("Drafts");
+        const appended = await port.append(
+          draftsPath,
+          source,
+          ["\\Draft", "\\Seen"],
+          new Date(draft.updatedAt),
+        );
+        // APPENDUID is optional. Resolve the newest copy before marking clean,
+        // and collect prior copies left by an interrupted/lost APPEND response.
+        const copies = await port.searchHeader(draftsPath, "X-Post-Draft-Id", draft.messageIdHeader);
+        const uid = appended.uid ?? (copies.length ? Math.max(...copies) : undefined);
+        if (uid === undefined) throw new Error("Draft APPEND could not be reconciled");
+        const prevUid: number | undefined = draft.remoteUid;
+        const folderId = await ctx.runMutation(internal.syncStore.upsertFolder, {
+          accountId: draft.accountId,
+          path: draftsPath,
+          role: "drafts",
+        });
+        const recorded = await ctx.runMutation(internal.syncStore.markDraftPushed, {
+          draftId: args.draftId,
+          folderId,
+          uid,
+          pushedUpdatedAt: draft.updatedAt,
+          pushedAccountId: draft.accountId,
+        });
+        if (!recorded && uid !== undefined) {
+          // The draft was sent or discarded while APPEND was in flight.
+          await port.expunge(draftsPath, [...new Set([...copies, uid])], true);
+          return { uid: undefined };
         }
+        const obsolete = [...new Set([...copies, ...(prevUid !== undefined ? [prevUid] : [])])].filter(old => old !== uid);
+        if (obsolete.length) {
+          try {
+            await port.expunge(draftsPath, obsolete, true);
+          } catch {
+            // The old remote copy will be cleaned on the next sync.
+          }
+        }
+        return { uid };
+      } finally {
+        await client.logout().catch(() => client.close());
       }
-      return { uid };
-    } finally {
-      await client.logout().catch(() => client.close());
-    }
+    } finally { await lease?.stop(); }
   },
 });
 

@@ -7,6 +7,7 @@ import { internalAction, type ActionCtx } from "../../convex/_generated/server";
 import type { Id } from "../../convex/_generated/dataModel";
 import schema from "../../convex/schema";
 import { materializeDraftAttachments } from "../../convex/node/draftAttachments";
+import { draftAttachmentId } from "../../convex/lib/draftAttachment";
 import { makeMessage, modules, seedAccount, seedFolder } from "../convex/testUtil";
 
 async function setup() {
@@ -51,6 +52,7 @@ test("imported attachments survive replacement and deletion of the old remote dr
   const { t, user, draftId, source, ctx, draft, sent } = await setup();
   const materialized = await materializeDraftAttachments(ctx, draft);
   expect(materialized!.attachments[0].kind).toBe("upload");
+  expect(draftAttachmentId(materialized!.attachments[0])).toBe(draftAttachmentId(draft.attachments[0]));
   await t.mutation(internal.syncStore.deleteMessages, { ids: [source.messageId] });
   expect(await t.run(ctx => ctx.db.get(source.messageId))).toBeNull();
   await user.action(api.send.sendDraft, { draftId });
@@ -60,7 +62,7 @@ test("imported attachments survive replacement and deletion of the old remote dr
 test("attachment removals during download are preserved and unused uploads are deleted", async () => {
   const { t, user, draftId, ctx, draft, downloads, uploads } = await setup();
   downloads.mockImplementation(async () => {
-    await user.mutation(api.drafts.removeAttachment, { draftId, index: 0 });
+    await user.mutation(api.drafts.removeAttachment, { draftId, attachmentId: draftAttachmentId(draft.attachments[0]) });
     return new TextEncoder().encode("attachment").buffer;
   });
   expect(await materializeDraftAttachments(ctx, draft)).toBeNull();

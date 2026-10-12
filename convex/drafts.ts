@@ -7,6 +7,7 @@ import { requireUserId } from "./model/auth";
 import { enqueueOp } from "./model/pendingOps";
 import { addressV } from "./validators";
 import { newMessageId } from "./lib/compose";
+import { draftAttachmentId } from "./lib/draftAttachment";
 import type { MutationCtx } from "./_generated/server";
 
 const PUSH_THROTTLE_MS = 30 * 1000;
@@ -15,6 +16,7 @@ const apiKeyArg = { apiKey: v.optional(v.string()) };
 const draftAttachmentV = v.union(
   v.object({
     kind: v.literal("upload"),
+    id: v.optional(v.string()),
     storageId: v.id("_storage"),
     filename: v.string(),
     contentType: v.string(),
@@ -22,6 +24,7 @@ const draftAttachmentV = v.union(
   }),
   v.object({
     kind: v.literal("forward"),
+    id: v.optional(v.string()),
     messageId: v.id("messages"),
     attachmentId: v.string(),
     filename: v.string(),
@@ -190,7 +193,9 @@ export const create = mutation({
       const message = await ctx.db.get(args.replyToMessageId);
       if (!message || message.userId !== userId) throw new Error("Message not found");
     }
-    for (const attachment of args.attachments ?? []) await validateAttachment(ctx, userId, attachment);
+    const attachments = (args.attachments ?? []).map(a => ({ ...a, id: a.id ?? crypto.randomUUID() }));
+    if (new Set(attachments.map(a => a.id)).size !== attachments.length) throw new Error("Duplicate attachment ID");
+    for (const attachment of attachments) await validateAttachment(ctx, userId, attachment);
     const domain = account.email.split("@")[1] ?? "localhost";
     const now = Date.now();
     const draftId = await ctx.db.insert("drafts", {
@@ -205,7 +210,7 @@ export const create = mutation({
       subject: args.subject ?? "",
       html: args.html ?? "",
       text: args.text ?? "",
-      attachments: args.attachments ?? [],
+      attachments,
       messageIdHeader: newMessageId(domain),
       status: "editing",
       remoteDirty: true,
@@ -268,13 +273,23 @@ export const addAttachment = mutation({
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
     const draft = await ownedDraft(ctx, userId, args.draftId);
-    await validateAttachment(ctx, userId, args.attachment);
+    const attachment = { ...args.attachment, id: args.attachment.id ?? crypto.randomUUID() };
+    await validateAttachment(ctx, userId, attachment);
+    const existing = draft.attachments.find(a => draftAttachmentId(a) === attachment.id);
+    if (existing) {
+      if (draftAttachmentId({ ...existing, id: undefined }) !== draftAttachmentId({ ...attachment, id: undefined })
+        || existing.filename !== attachment.filename || existing.contentType !== attachment.contentType || existing.size !== attachment.size) {
+        throw new Error("Attachment ID already in use");
+      }
+      return attachment.id;
+    }
     await ctx.db.patch(args.draftId, {
-      attachments: [...draft.attachments, args.attachment],
+      attachments: [...draft.attachments, attachment],
       remoteDirty: true,
       updatedAt: Date.now(),
     });
     await schedulePush(ctx, draft);
+    return attachment.id;
   },
 });
 
@@ -282,17 +297,19 @@ export const removeAttachment = mutation({
   args: {
     ...apiKeyArg,
     draftId: v.id("drafts"),
-    index: v.number(),
+    attachmentId: v.string(),
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx, args.apiKey);
     const draft = await ownedDraft(ctx, userId, args.draftId);
-    const att = draft.attachments[args.index];
-    if (!att) return;
-    if (att.kind === "upload") {
-      await ctx.storage.delete(att.storageId);
+    const removed = draft.attachments.filter(a => draftAttachmentId(a) === args.attachmentId);
+    if (removed.length === 0) return;
+    const next = draft.attachments.filter(a => draftAttachmentId(a) !== args.attachmentId);
+    for (const att of removed) {
+      if (att.kind === "upload" && !next.some(a => a.kind === "upload" && a.storageId === att.storageId)) {
+        await ctx.storage.delete(att.storageId);
+      }
     }
-    const next = draft.attachments.filter((_, i) => i !== args.index);
     await ctx.db.patch(args.draftId, {
       attachments: next,
       remoteDirty: true,
