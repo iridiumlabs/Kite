@@ -51,7 +51,7 @@ Generate a **Production Deploy Key** in the production deployment's settings, wi
 
 Import this repository, choose the Next.js framework preset, use the repository root, and use a supported Node.js version (Node 24 was used for local verification). Installation is `npm ci`.
 
-Set Vercel's Production Branch to `main` and ensure it contains the completed app changes. Git deployments require committed, published code; Vercel cannot deploy local-only edits or commits.
+Set Vercel's Production Branch to `main` and ensure it contains the completed app changes. `vercel.json` disables automatic Git deployments for all other branches, including PR previews, while keeping deployments from `main` enabled. Manual CLI/dashboard deployments remain possible. Git deployments require committed, published code; Vercel cannot deploy local-only edits or commits.
 
 Set these Vercel environment variables for **Production**:
 
