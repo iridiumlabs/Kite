@@ -256,6 +256,9 @@ export default defineSchema({
     accountId: v.id("accounts"),
     threadId: v.optional(v.id("threads")),
     replyToMessageId: v.optional(v.id("messages")),
+    inReplyTo: v.optional(v.string()),
+    references: v.optional(v.array(v.string())),
+    bodyIncludesQuote: v.optional(v.boolean()),
     mode: v.union(
       v.literal("new"),
       v.literal("reply"),

@@ -1252,6 +1252,25 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     expect(await t.run(ctx => ctx.db.query("pendingOps").collect())).toHaveLength(2);
   });
 
+  test("foreign reply import carries parsed threading through the production store adapter", async () => {
+    const { t, imap, deps } = await world();
+    imap.mailbox("INBOX").append(mailSource({ id: "remote-parent@t" }));
+    imap.mailbox("Drafts").append(mailSource({
+      id: "foreign-reply@t", from: OWNER_EMAIL, to: "sender@x.com", subject: "Re: hello",
+      inReplyTo: "remote-parent@t", references: ["root@t", "remote-parent@t"], body: "My reply\n> Existing quote",
+    }));
+    await runAccountSync(deps);
+    // Draft linking reads the persisted folder window on the following scan.
+    await runAccountSync(deps);
+    const original = (await allMessages(t)).find(m => m.messageIdHeader === "remote-parent@t")!;
+    const drafts = await t.run(ctx => ctx.db.query("drafts").collect());
+    expect(drafts).toMatchObject([{
+      mode: "reply", replyToMessageId: original._id, threadId: original.threadId,
+      inReplyTo: "remote-parent@t", references: ["root@t", "remote-parent@t"], bodyIncludesQuote: true,
+      text: "My reply\n> Existing quote",
+    }]);
+  });
+
   test("foreign-client remote drafts are imported only once", async () => {
     const { t, imap, deps, now } = await world();
     imap.mailbox("Drafts").append(mailSource({ id: "foreign-draft@t", from: OWNER_EMAIL }));

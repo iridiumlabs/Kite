@@ -67,6 +67,8 @@ export function ReaderContainer({
 }) {
   const data = useQuery(api.mail.getThread, { threadId });
   const getContent = useAction(api.content.getMessageContent);
+  const settings = useQuery(api.settings.get, {});
+  const loadRemoteImages = settings?.loadRemoteImages ?? false;
   const setRead = useMutation(api.mail.setRead);
   const setStarred = useMutation(api.mail.setStarred);
   const archive = useMutation(api.mail.archive);
@@ -136,8 +138,9 @@ export function ReaderContainer({
   useEffect(() => {
     for (const m of messages) {
       if (!expandedIds.has(m.id)) continue;
-      if (getCached(m.id)) continue;
-      if (!markInflight(m.id)) continue;
+      const allowRemote = loadRemoteImages || remoteImageIds.has(m.id);
+      if (getCached(m.id, allowRemote)) continue;
+      if (!markInflight(m.id, allowRemote)) continue;
       let timer: ReturnType<typeof setTimeout>;
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(
@@ -148,12 +151,12 @@ export function ReaderContainer({
       Promise.race([
         getContent({
           messageId: m.id as Id<"messages">,
-          loadRemoteImages: remoteImageIds.has(m.id) ? true : undefined,
+          loadRemoteImages: allowRemote,
         }),
         timeout,
       ])
         .then((res) => {
-          setCached(m.id, res as MessageContent);
+          setCached(m.id, res as MessageContent, allowRemote);
         })
         .catch((e) => {
           const msg =
@@ -162,14 +165,14 @@ export function ReaderContainer({
               : e instanceof Error && /timed out/i.test(e.message)
                 ? e.message
                 : "This message could not be loaded.";
-          setCached(m.id, { error: msg });
+          setCached(m.id, { error: msg }, allowRemote);
         })
         .finally(() => {
           clearTimeout(timer);
-          clearInflight(m.id);
+          clearInflight(m.id, allowRemote);
         });
     }
-  }, [expandedIds, messages, getContent, contentVersion, remoteImageIds]);
+  }, [expandedIds, messages, getContent, contentVersion, remoteImageIds, loadRemoteImages]);
 
   const onRetryContent = useCallback((id: string) => {
     evictCached(id);
@@ -311,9 +314,9 @@ export function ReaderContainer({
   const contentFor = useCallback(
     (id: string): MessageContent | undefined => {
       void contentVersion;
-      return getCached(id);
+      return getCached(id, loadRemoteImages || remoteImageIds.has(id));
     },
-    [contentVersion],
+    [contentVersion, loadRemoteImages, remoteImageIds],
   );
 
   if (data === undefined) {

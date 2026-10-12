@@ -387,6 +387,8 @@ export interface StorePort {
   ): Promise<void>;
   importRemoteDraft(fields: {
     messageIdHeader: string;
+    inReplyTo?: string;
+    references?: string[];
     subject: string;
     to: Address[];
     cc: Address[];

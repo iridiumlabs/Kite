@@ -888,6 +888,8 @@ async function syncRemoteDrafts(
       const parsed = await deps.parser.parse(src);
       await deps.store.importRemoteDraft({
         messageIdHeader: `import-${crypto.randomUUID()}`,
+        inReplyTo: parsed.inReplyTo,
+        references: parsed.references,
         subject: parsed.subject,
         to: parsed.to,
         cc: parsed.cc,

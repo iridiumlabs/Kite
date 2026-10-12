@@ -469,7 +469,7 @@ function ComposePane({
   const wantsQuote =
     win.mode === "reply" ||
     win.mode === "replyAll" ||
-    (win.mode === "draft" && quoteSourceId !== undefined);
+    (win.mode === "draft" && quoteSourceId !== undefined && !existingDraft?.bodyIncludesQuote);
   useEffect(() => {
     if (quoteFetchedRef.current || !wantsQuote || !quoteSourceId) return;
     quoteFetchedRef.current = true;

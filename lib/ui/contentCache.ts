@@ -4,6 +4,7 @@ const MAX = 50;
 const cache = new Map<string, MessageContent>();
 const inflight = new Set<string>();
 const listeners = new Set<() => void>();
+const keyFor = (id: string, loadRemoteImages: boolean) => JSON.stringify([id, loadRemoteImages]);
 let version = 0;
 function notify() {
   version++;
@@ -16,18 +17,18 @@ export function subscribeContent(listener: () => void) {
 export const contentSnapshot = () => version;
 export const serverContentSnapshot = () => 0;
 
-export function getCached(id: string): MessageContent | undefined {
-  const v = cache.get(id);
-  if (v) {
-    // LRU touch
-    cache.delete(id);
-    cache.set(id, v);
+export function getCached(id: string, loadRemoteImages = false): MessageContent | undefined {
+  const key = keyFor(id, loadRemoteImages);
+  const value = cache.get(key);
+  if (value) {
+    cache.delete(key);
+    cache.set(key, value);
   }
-  return v;
+  return value;
 }
 
-export function setCached(id: string, content: MessageContent) {
-  cache.set(id, content);
+export function setCached(id: string, content: MessageContent, loadRemoteImages = content.loadRemoteImages ?? false) {
+  cache.set(keyFor(id, loadRemoteImages), content);
   if (cache.size > MAX) {
     const oldest = cache.keys().next().value;
     if (oldest) cache.delete(oldest);
@@ -35,17 +36,20 @@ export function setCached(id: string, content: MessageContent) {
   notify();
 }
 
-export function markInflight(id: string): boolean {
-  if (inflight.has(id) || inflight.size >= 3) return false;
-  inflight.add(id);
+export function markInflight(id: string, loadRemoteImages = false): boolean {
+  const key = keyFor(id, loadRemoteImages);
+  if (inflight.has(key) || inflight.size >= 3) return false;
+  inflight.add(key);
   return true;
 }
 
-export function clearInflight(id: string) {
-  inflight.delete(id);
+export function clearInflight(id: string, loadRemoteImages = false) {
+  // Wake policy-changed readers that were waiting for request capacity.
+  if (inflight.delete(keyFor(id, loadRemoteImages))) notify();
 }
 
 export function evictCached(id: string) {
-  cache.delete(id);
+  cache.delete(keyFor(id, false));
+  cache.delete(keyFor(id, true));
   notify();
 }

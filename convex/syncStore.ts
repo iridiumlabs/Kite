@@ -3,13 +3,14 @@ import {
   internalMutation,
   internalQuery,
   MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import { Doc, Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { ingestMessage } from "./model/ingest";
 import { recomputeThread } from "./model/threads";
 import { addressV } from "./validators";
-import { migrateOps, refreshAccountOps, refreshTargetQueue } from "./model/pendingOps";
+import { enqueueOp, migrateOps, refreshAccountOps, refreshTargetQueue } from "./model/pendingOps";
 
 const ingestMessageV = v.object({
   uid: v.optional(v.number()),
@@ -913,6 +914,23 @@ export const markDraftPushed = internalMutation({
   },
 });
 
+export const retryDraftPush = internalMutation({
+  args: { draftId: v.id("drafts") },
+  handler: async (ctx, args) => {
+    const draft = await ctx.db.get(args.draftId);
+    if (!draft?.remoteDirty || draft.status === "sending" || draft.status === "uncertain" || !await ctx.db.get(draft.accountId)) return;
+    const queued = await ctx.db.query("pendingOps").withIndex("by_account_target_order", q =>
+      q.eq("accountId", draft.accountId).eq("targetKey", `draft:${draft._id}`)).first();
+    if (queued) return;
+    const nextAttemptAt = Date.now() + 30_000;
+    await enqueueOp(ctx, {
+      userId: draft.userId, accountId: draft.accountId, kind: "appendDraft",
+      payload: { draftId: draft._id }, nextAttemptAt,
+    });
+    await ctx.db.patch(draft._id, { pushScheduledAt: nextAttemptAt });
+  },
+});
+
 export const clearDraftSchedule = internalMutation({
   args: { draftId: v.id("drafts") },
   handler: async (ctx, args) => {
@@ -965,11 +983,33 @@ const draftAttachmentV = v.union(
   }),
 );
 
+async function findReplyTarget(ctx: Pick<QueryCtx, "db">, accountId: Id<"accounts">, userId: string, header?: string) {
+  const candidates = header ? await ctx.db.query("messages")
+    .withIndex("by_account_msgid", q => q.eq("accountId", accountId).eq("messageIdHeader", header)).take(10) : [];
+  return candidates.find(m => m.userId === userId && !m.isOutbound && m.folderRole !== "drafts")
+    ?? candidates.find(m => m.userId === userId && m.folderRole !== "drafts") ?? null;
+}
+
+export const draftReplyTarget = internalQuery({
+  args: { draftId: v.id("drafts") },
+  handler: async (ctx, args) => {
+    const draft = await ctx.db.get(args.draftId);
+    if (!draft) return null;
+    if (draft.replyToMessageId) {
+      const original = await ctx.db.get(draft.replyToMessageId);
+      if (original?.userId === draft.userId) return original;
+    }
+    return await findReplyTarget(ctx, draft.accountId, draft.userId, draft.inReplyTo ?? draft.references?.at(-1));
+  },
+});
+
 export const importRemoteDraft = internalMutation({
   args: {
     userId: v.string(),
     accountId: v.id("accounts"),
     messageIdHeader: v.string(),
+    inReplyTo: v.optional(v.string()),
+    references: v.optional(v.array(v.string())),
     subject: v.string(),
     to: v.array(addressV),
     cc: v.array(addressV),
@@ -985,11 +1025,19 @@ export const importRemoteDraft = internalMutation({
       .withIndex("by_remote", q => q.eq("remoteFolderId", args.remoteFolderId).eq("remoteUid", args.remoteUid))
       .first();
     if (existing) return existing._id;
+    const references = (args.references ?? []).slice(-30);
+    const inReplyTo = args.inReplyTo ?? references.at(-1);
+    const original = await findReplyTarget(ctx, args.accountId, args.userId, inReplyTo);
     const now = Date.now();
     const id = await ctx.db.insert("drafts", {
       userId: args.userId,
       accountId: args.accountId,
-      mode: "new",
+      mode: inReplyTo ? "reply" : "new",
+      replyToMessageId: original?._id,
+      threadId: original?.threadId,
+      inReplyTo,
+      references,
+      bodyIncludesQuote: !!inReplyTo,
       to: args.to,
       cc: args.cc,
       bcc: args.bcc,

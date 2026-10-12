@@ -85,7 +85,10 @@ export const purgeAccountBatch = internalMutation({
           .query("messages")
           .withIndex("by_thread", (q) => q.eq("threadId", t._id))
           .collect();
-        for (const m of msgs) await ctx.db.delete(m._id);
+        for (const m of msgs) {
+          if (m.sourceStorageId) await ctx.storage.delete(m.sourceStorageId);
+          await ctx.db.delete(m._id);
+        }
         await writeThread(ctx, t._id, null);
       }
       await ctx.scheduler.runAfter(
@@ -127,7 +130,10 @@ export const purgeAccountBatch = internalMutation({
     const sendLogs = await ctx.db.query("sendLog")
       .withIndex("by_account", (q) => q.eq("accountId", args.accountId))
       .take(ROW_BATCH);
-    for (const row of sendLogs) await ctx.db.delete(row._id);
+    for (const row of sendLogs) {
+      if (row.recovery?.sourceStorageId) await ctx.storage.delete(row.recovery.sourceStorageId);
+      await ctx.db.delete(row._id);
+    }
     if (
       drafts.length === ROW_BATCH ||
       ops.length === ROW_BATCH ||

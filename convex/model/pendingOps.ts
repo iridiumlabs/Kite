@@ -96,12 +96,12 @@ export type PendingOpPayloads = {
 export type PendingOpKind = keyof PendingOpPayloads;
 
 export async function enqueueOp<K extends PendingOpKind>(ctx: MutationCtx, args: {
-  userId: string; accountId: Id<"accounts">; kind: K; payload: PendingOpPayloads[K];
+  userId: string; accountId: Id<"accounts">; kind: K; payload: PendingOpPayloads[K]; nextAttemptAt?: number;
 }): Promise<void> {
   for (const payload of splitOpPayload(args.kind, args.payload as PendingOpPayload)) {
     await insertQueuedOp(ctx, {
       userId: args.userId, accountId: args.accountId, kind: args.kind, payload,
-      attempts: 0, nextAttemptAt: Date.now(), createdAt: Date.now(),
+      attempts: 0, nextAttemptAt: args.nextAttemptAt ?? Date.now(), createdAt: Date.now(),
     });
   }
   await refreshAccountOps(ctx, args.accountId);

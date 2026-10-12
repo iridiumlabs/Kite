@@ -8,6 +8,7 @@ import { connectImap, FlowPort, accountToImapConfig } from "./imap";
 import { decryptCredentials } from "./crypto";
 import type { Doc } from "../_generated/dataModel";
 import { materializeDraftAttachments } from "./draftAttachments";
+import { threadingHeaders } from "../lib/compose";
 
 export async function buildDraftSource(
   ctx: Pick<ActionCtx, "runQuery" | "runAction" | "storage">,
@@ -40,6 +41,15 @@ export async function buildDraftSource(
       });
     }
   }
+  let inReplyTo = draft.inReplyTo;
+  let references = draft.references;
+  if (!inReplyTo && draft.replyToMessageId && draft.mode !== "forward") {
+    const original = await ctx.runQuery(internal.send.messageForCompose, { messageId: draft.replyToMessageId });
+    if (original) ({ inReplyTo, references } = threadingHeaders(original));
+  }
+  const headers: Record<string, string> = { "X-Post-Draft-Id": draft.messageIdHeader };
+  if (inReplyTo) headers["In-Reply-To"] = `<${inReplyTo}>`;
+  if (references?.length) headers["References"] = references.map(id => `<${id}>`).join(" ");
   const mail = new MailComposer({
     from: `${account.displayName} <${account.email}>`,
     to: draft.to.map((a) => (a.name ? `${a.name} <${a.email}>` : a.email)),
@@ -49,7 +59,7 @@ export async function buildDraftSource(
     text: draft.text || undefined,
     html: draft.html || undefined,
     messageId: `<${draft.messageIdHeader}>`,
-    headers: { "X-Post-Draft-Id": draft.messageIdHeader },
+    headers,
     attachments,
   });
   const compiled = mail.compile();
@@ -69,7 +79,7 @@ export const pushDraftNow = internalAction({
   args: { draftId: v.id("drafts") },
   handler: async (ctx, args): Promise<{ uid: number | undefined }> => {
     const draft = await ctx.runQuery(internal.syncStore.draftById, args);
-    if (!draft || !draft.remoteDirty) return { uid: draft?.remoteUid };
+    if (!draft || !draft.remoteDirty || draft.status === "sending" || draft.status === "uncertain") return { uid: draft?.remoteUid };
     const owner = crypto.randomUUID();
     try {
       await ctx.runMutation(internal.syncStore.acquireLease, { accountId: draft.accountId, owner, ttlMs: 240_000 });
@@ -78,6 +88,11 @@ export const pushDraftNow = internalAction({
       return { uid: draft.remoteUid };
     }
     try { return await ctx.runAction(internal.node.draftsOps.pushDraftUnderLease, args); }
+    catch (error) {
+      // Transfer failed scheduled pushes to the durable, bounded ops queue.
+      await ctx.runMutation(internal.syncStore.retryDraftPush, args);
+      throw error;
+    }
     finally { await ctx.runMutation(internal.syncStore.releaseLease, { accountId: draft.accountId, owner }); }
   },
 });
@@ -90,7 +105,7 @@ export const pushDraftUnderLease = internalAction({
       internal.syncStore.draftById,
       { draftId: args.draftId },
     );
-    if (!draft || !draft.remoteDirty) return { uid: draft?.remoteUid };
+    if (!draft || !draft.remoteDirty || draft.status === "sending" || draft.status === "uncertain") return { uid: draft?.remoteUid };
     const account: Doc<"accounts"> | null = await ctx.runQuery(
       internal.syncStore.getAccountDoc,
       { accountId: draft.accountId },
@@ -98,7 +113,7 @@ export const pushDraftUnderLease = internalAction({
     const secret = await ctx.runQuery(internal.syncStore.getSecret, {
       accountId: draft.accountId,
     });
-    if (!account || !secret) return { uid: undefined };
+    if (!account || !secret) throw new Error("Draft account credentials are unavailable");
     const { username, password } = decryptCredentials(secret);
     const cfg = accountToImapConfig(account);
     const client = await connectImap({ ...cfg, username, password });

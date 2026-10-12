@@ -1000,13 +1000,14 @@ async function runSendDraft(
   if (!draft || draft.userId !== userId) throw new Error("Draft not found");
   if (draft.status === "sending") throw new Error("Draft is already sending");
   try {
-  let inReplyTo: string | undefined;
-  let references: string[] | undefined;
+  let inReplyTo: string | undefined = draft.inReplyTo;
+  let references: string[] | undefined = draft.references;
   let replyToMessageDocId: Id<"messages"> | undefined;
-  if (draft.replyToMessageId) {
+  if (draft.replyToMessageId || draft.inReplyTo) {
+    // The reply target may have been backfilled since a foreign draft import.
     const original: Doc<"messages"> | null = await ctx.runQuery(
-      internal.send.messageForCompose,
-      { messageId: draft.replyToMessageId },
+      internal.syncStore.draftReplyTarget,
+      { draftId },
     );
     if (original) {
       const th = threadingHeaders({
@@ -1019,15 +1020,15 @@ async function runSendDraft(
         replyTo: original.replyTo,
         date: original.date,
       });
-      inReplyTo = th.inReplyTo;
-      references = th.references;
+      inReplyTo ??= th.inReplyTo;
+      references ??= th.references;
       replyToMessageDocId = original._id;
     }
   }
 
   let html = draft.html || undefined;
   let text = draft.text || undefined;
-  if (draft.replyToMessageId && draft.mode !== "new") {
+  if (draft.replyToMessageId && draft.mode !== "new" && !draft.bodyIncludesQuote) {
     const { doc, content } = await loadOriginal(ctx, draft.replyToMessageId, userId);
     ({ html, text } = appendOriginalQuote(draft.mode, doc, content, { html, text }));
   }

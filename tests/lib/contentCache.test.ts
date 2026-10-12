@@ -11,11 +11,27 @@ test("cache writes and retries notify remounted readers sharing an in-flight req
   clearInflight("shared");
   expect(getCached("shared")?.text).toBe("Loaded");
   expect(contentSnapshot()).toBeGreaterThan(version);
-  expect(renders).toBe(1);
+  expect(renders).toBe(2);
   evictCached("shared");
   expect(getCached("shared")).toBeUndefined();
-  expect(renders).toBe(2);
+  expect(renders).toBe(3);
   unsubscribe();
+});
+
+test("cached bodies and in-flight requests are isolated by image policy", () => {
+  setCached("privacy", { html: '<img src="https://tracker.test/">', loadRemoteImages: true });
+  expect(getCached("privacy", false)).toBeUndefined();
+  expect(markInflight("privacy", false)).toBe(true);
+  expect(markInflight("privacy", true)).toBe(true);
+  setCached("privacy", { html: "<p>blocked</p>", loadRemoteImages: false });
+  // A stale allowed request completing later cannot overwrite the blocked body.
+  setCached("privacy", { html: '<img src="https://late-tracker.test/">', loadRemoteImages: true });
+  expect(getCached("privacy", false)).toMatchObject({ html: "<p>blocked</p>", loadRemoteImages: false });
+  expect(getCached("privacy", true)?.loadRemoteImages).toBe(true);
+  clearInflight("privacy", false); clearInflight("privacy", true);
+  evictCached("privacy");
+  expect(getCached("privacy", false)).toBeUndefined();
+  expect(getCached("privacy", true)).toBeUndefined();
 });
 
 test("reader cache retains at most fifty bodies with LRU eviction", () => {

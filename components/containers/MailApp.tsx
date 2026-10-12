@@ -45,17 +45,7 @@ import { useAppearance } from "@/lib/ui/useAppearance";
 import { PanelLeft } from "lucide-react";
 import { Dialog } from "@base-ui/react/dialog";
 import { SignOutListener } from "@/components/SignOutListener";
-
-const THREAD_VIEWS = new Set([
-  "primary",
-  "other",
-  "archive",
-  "trash",
-  "snoozed",
-  "starred",
-  "account",
-  "category",
-]);
+import { isThreadListView } from "@/lib/ui/threadViews";
 
 function parseSlug(slug?: string[]): {
   view: ViewKind;
@@ -158,7 +148,7 @@ export function MailApp() {
     };
   }, [ui.filter]);
 
-  const isThreadView = THREAD_VIEWS.has(view);
+  const isThreadView = isThreadListView(view);
   const listArgs = useMemo(
     () => ({
       view: (view === "account" || view === "category" ? view : view) as never,
@@ -504,6 +494,7 @@ export function MailApp() {
       else if (threadId) closeThread();
     },
     onArchive: () => {
+      if (!isThreadView && !threadId) return;
       const t = threadId ? threads.find((x) => x.id === threadId) : focusedThread;
       if (t) doArchive(t);
       else if (threadId) {
@@ -512,14 +503,17 @@ export function MailApp() {
       }
     },
     onTrash: () => {
+      if (!isThreadView && !threadId) return;
       const t = threadId ? threads.find((x) => x.id === threadId) : focusedThread;
       if (t) doTrash(t);
     },
     onStar: () => {
+      if (!isThreadView && !threadId) return;
       const t = threadId ? threads.find((x) => x.id === threadId) : focusedThread;
       if (t) doStar(t);
     },
     onToggleRead: () => {
+      if (!isThreadView && !threadId) return;
       const t = threadId ? threads.find((x) => x.id === threadId) : focusedThread;
       if (t) doToggleRead(t);
     },
@@ -916,7 +910,7 @@ export function MailApp() {
             selectedId={threadId}
             focusedId={focusedId ?? undefined}
             onOpen={openThread}
-            actions={wideLayout ? rowActions : undefined}
+            actions={wideLayout && isThreadView ? rowActions : undefined}
             footer={listFooter}
           />
         )}

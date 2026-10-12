@@ -178,6 +178,8 @@ export function makeStorePort(ctx: Ctx, accountId: Id<"accounts">): StorePort {
         userId: state!.account.userId,
         accountId,
         messageIdHeader: fields.messageIdHeader,
+        inReplyTo: fields.inReplyTo,
+        references: fields.references,
         subject: fields.subject,
         to: fields.to as never,
         cc: fields.cc as never,
