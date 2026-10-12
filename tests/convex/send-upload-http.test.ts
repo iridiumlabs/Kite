@@ -1,0 +1,22 @@
+import { afterEach, expect, test, vi } from "vitest";
+import type { Id } from "../../convex/_generated/dataModel";
+import { api } from "../../convex/_generated/api";
+import { makeT } from "./testUtil";
+afterEach(() => vi.useRealTimers());
+test("HTTP send upload requires a valid key, caps bytes, and expires temporary input", async () => {
+  vi.useFakeTimers();
+  const t = makeT();
+  const created = await t.withIdentity({ subject: "a" }).mutation(api.apiKeys.create, { name: "upload" });
+  const key = created.key;
+  expect((await t.fetch("/send-attachment", { method: "POST", body: "x" })).status).toBe(401);
+  expect((await t.fetch("/send-attachment", { method: "POST", body: "x", headers: { authorization: "Bearer invalid" } })).status).toBe(401);
+  const headers = { authorization: `Bearer ${key}`, "content-type": "text/plain" };
+  expect((await t.fetch("/send-attachment", { method: "POST", body: "x", headers: { ...headers, "content-length": String(26 * 1024 * 1024) } })).status).toBe(413);
+  const res = await t.fetch("/send-attachment", { method: "POST", body: "bytes", headers });
+  expect(res.status).toBe(200);
+  const { storageId } = await res.json() as { storageId: Id<"_storage"> };
+  expect(await t.run(async ctx => (await ctx.storage.get(storageId))!.text())).toBe("bytes");
+  await vi.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+  await t.finishInProgressScheduledFunctions();
+  expect(await t.run(ctx => ctx.storage.get(storageId))).toBeNull();
+});
