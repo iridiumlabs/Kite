@@ -69,6 +69,8 @@ npx convex deploy --cmd-url-env-var-name NEXT_PUBLIC_CONVEX_URL --cmd "npm run b
 
 This deploys the Convex schema/functions/auth configuration/crons as well as building Next.js. It injects the correct production Convex URL as `NEXT_PUBLIC_CONVEX_URL` during the build, which is used by both the browser and MCP route. Do not retain a localhost `NEXT_PUBLIC_CONVEX_URL`. If you choose to deploy Convex separately and use only `npm run build`, you must explicitly set `NEXT_PUBLIC_CONVEX_URL` to that production deployment's HTTPS URL.
 
+Keep `convex/_generated/` committed to Git. Convex runs the frontend build before regenerating these files, so a fresh Vercel checkout needs the generated API and types already present. Regenerate them with `npx convex codegen` after changing backend functions/schema and commit the changes. These files contain code/types, not deploy keys or mailbox data.
+
 Do not upload `.env.local`, copy its local `CONVEX_DEPLOYMENT`, or set either `KITE_DEV_AUTH` or `NEXT_PUBLIC_KITE_DEV_AUTH` on Vercel. Leave all dev-auth flags unset, including for preview builds. Never give an untrusted preview build the production deploy key.
 
 Deploy, attach your stable custom domain, and redeploy after changing build-time variables. Verify that the production Clerk configuration matches the domain you are actually using.
