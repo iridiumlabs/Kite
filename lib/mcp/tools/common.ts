@@ -1,12 +1,12 @@
 // Shared registration helper, zod primitives, and small utilities used by
-// every Post MCP tool. Tool handlers never touch HTTP or Convex directly;
-// they call the PostBackend resolved per request.
+// every Kite MCP tool. Tool handlers never touch HTTP or Convex directly;
+// they call the KiteBackend resolved per request.
 import { z } from "zod";
 import type { McpServer, ServerContext } from "@modelcontextprotocol/server";
-import type { PostBackend } from "../backend";
+import type { KiteBackend } from "../backend";
 import { friendlyMessage, type AddressIn } from "../format";
 
-export type BackendFor = (ctx: ServerContext) => PostBackend;
+export type BackendFor = (ctx: ServerContext) => KiteBackend;
 
 export function okResult(data: Record<string, unknown>) {
   const text = JSON.stringify(data);
@@ -46,7 +46,7 @@ export function addTool<I>(
   getBackend: BackendFor,
   name: string,
   spec: ToolSpec<I>,
-  handler: (args: I, backend: PostBackend) => Promise<unknown>,
+  handler: (args: I, backend: KiteBackend) => Promise<unknown>,
 ) {
   server.registerTool(
     name,
@@ -256,7 +256,7 @@ export const zUpdated = z.object({
 // Maps message ids to their thread ids so bulk responses can report the
 // threads actually touched.
 export async function resolveThreadIds(
-  backend: PostBackend,
+  backend: KiteBackend,
   threadIds: string[] | undefined,
   messageIds: string[] | undefined,
 ): Promise<string[]> {

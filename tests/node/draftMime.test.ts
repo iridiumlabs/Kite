@@ -2,6 +2,8 @@
 import { expect, test } from "vitest";
 import { buildDraftSource } from "../../convex/node/draftsOps";
 import { MailParserPort } from "../../convex/node/mailParser";
+import { structureToMeta } from "../../convex/node/imap";
+import type { FetchMessageObject } from "imapflow";
 import type { Doc } from "../../convex/_generated/dataModel";
 import type { ActionCtx } from "../../convex/_generated/server";
 
@@ -12,6 +14,12 @@ test("reply draft serialization preserves imported threading headers", async () 
   } as unknown as Doc<"drafts">;
   const source = await buildDraftSource({} as ActionCtx, draft, { email: "me@x.com", displayName: "Me" } as Doc<"accounts">);
   const parsed = await new MailParserPort().parse(source);
+  expect(source.toString()).toMatch(/^X-Kite-Draft-Id: draft@x\r?$/im);
+  expect(parsed.headers["x-kite-draft-id"]).toBe("draft@x");
+  const meta = structureToMeta({
+    uid: 1, envelope: { messageId: "<draft@x>" }, headers: Buffer.from(source),
+  } as FetchMessageObject);
+  expect(meta?.kiteDraftId).toBe("draft@x");
   expect(parsed).toMatchObject({ inReplyTo: "parent@x", references: ["root@x", "parent@x"] });
 });
 

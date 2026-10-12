@@ -28,7 +28,7 @@ export async function diagnosticMailbox(threaded: boolean) {
     });
     req.setTimeout(30_000, () => req.destroy(new Error("Ethereal request timed out")));
     req.on("error", reject);
-    req.end(JSON.stringify({ requestor: "post-diagnostic", version: "1.0" }));
+    req.end(JSON.stringify({ requestor: "kite-diagnostic", version: "1.0" }));
   });
   const { accountId } = await client.action(api.accounts.connect, {
     email: account.user, password: account.pass, displayName: "Diagnostic",

@@ -63,7 +63,7 @@ export const ingest = internalMutation({
   classificationCategories: v.optional(v.array(v.object({ id: v.id("categories"), name: v.string(), description: v.string() }))),
     classifyAttempts: v.optional(v.number()),
     bulk: v.optional(v.boolean()),
-    postDraftId: v.optional(v.string()),
+    kiteDraftId: v.optional(v.string()),
     sourceStorageId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {

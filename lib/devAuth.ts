@@ -2,21 +2,21 @@ import "server-only";
 import { createPublicKey, sign } from "node:crypto";
 
 const ISSUER = () =>
-  process.env.POST_DEV_AUTH_ISSUER ?? "http://localhost:3000/api/dev-auth";
-const KID = "post-dev-key-1";
+  process.env.KITE_DEV_AUTH_ISSUER ?? "http://localhost:3000/api/dev-auth";
+const KID = "kite-dev-key-1";
 const SUBJECT = "live-e2e-user";
 
 export function devAuthEnabled(): boolean {
   return (
     process.env.NODE_ENV === "development" &&
-    process.env.POST_DEV_AUTH === "1" &&
-    !!process.env.POST_DEV_AUTH_PRIVATE_KEY
+    process.env.KITE_DEV_AUTH === "1" &&
+    !!process.env.KITE_DEV_AUTH_PRIVATE_KEY
   );
 }
 
 function privateKeyPem(): string {
-  const b64 = process.env.POST_DEV_AUTH_PRIVATE_KEY;
-  if (!b64) throw new Error("POST_DEV_AUTH_PRIVATE_KEY is not set");
+  const b64 = process.env.KITE_DEV_AUTH_PRIVATE_KEY;
+  if (!b64) throw new Error("KITE_DEV_AUTH_PRIVATE_KEY is not set");
   return Buffer.from(b64, "base64").toString("utf8");
 }
 
@@ -53,7 +53,7 @@ export function signDevToken(ttlSeconds = 3600): string {
       iat: now,
       exp: now + ttlSeconds,
       name: "Dev user",
-      email: "dev@post.local",
+      email: "dev@kite.local",
     }),
   );
   const data = `${header}.${payload}`;

@@ -3,7 +3,7 @@
 // the matching change on the mail server asynchronously.
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import type { PostBackend, ThreadTargets } from "../backend";
+import type { KiteBackend, ThreadTargets } from "../backend";
 import {
   addTool,
   resolveThreadIds,
@@ -22,7 +22,7 @@ function bulkTool(
     description: string;
     annotations?: { destructiveHint?: boolean; idempotentHint?: boolean };
   },
-  run: (backend: PostBackend, targets: ThreadTargets) => Promise<void>,
+  run: (backend: KiteBackend, targets: ThreadTargets) => Promise<void>,
 ) {
   addTool(
     server,

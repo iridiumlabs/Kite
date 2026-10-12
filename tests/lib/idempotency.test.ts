@@ -13,10 +13,10 @@ const BASE = {
 
 describe("sha256Hex", () => {
   test("is 64 hex chars and deterministic", async () => {
-    const h = await sha256Hex("post");
+    const h = await sha256Hex("kite");
     expect(h).toMatch(/^[0-9a-f]{64}$/);
-    expect(await sha256Hex("post")).toBe(h);
-    expect(await sha256Hex("post2")).not.toBe(h);
+    expect(await sha256Hex("kite")).toBe(h);
+    expect(await sha256Hex("kite2")).not.toBe(h);
   });
 });
 

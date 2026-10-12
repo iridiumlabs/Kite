@@ -5,8 +5,8 @@ import { chromium, type Page } from "playwright";
 import { api } from "../convex/_generated/api";
 import type { Appearance } from "../lib/ui/useAppearance";
 
-const BASE = process.env.POST_UI_URL ?? "http://localhost:3000";
-const BACKEND = process.env.POST_CONVEX_URL ?? "http://127.0.0.1:3210";
+const BASE = process.env.KITE_UI_URL ?? "http://localhost:3000";
+const BACKEND = process.env.KITE_CONVEX_URL ?? "http://127.0.0.1:3210";
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function skin(page: Page, dark: boolean) {

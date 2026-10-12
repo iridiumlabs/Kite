@@ -1,12 +1,12 @@
-// HTTP wiring for /api/mcp: bearer auth via a Post API key, then the
+// HTTP wiring for /api/mcp: bearer auth via a Kite API key, then the
 // stateless Streamable HTTP MCP handler. Kept free of Next imports so the
 // auth layer is unit testable with plain Request objects.
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import type { AuthInfo, ServerContext } from "@modelcontextprotocol/server";
-import { registerPostTools, SERVER_INSTRUCTIONS } from "./server";
-import type { PostBackend } from "./backend";
+import { registerKiteTools, SERVER_INSTRUCTIONS } from "./server";
+import type { KiteBackend } from "./backend";
 
-export const API_KEY_PREFIX = "post_sk_";
+export const API_KEY_PREFIX = "kite_sk_";
 
 export interface WhoamiResult {
   userId: string;
@@ -16,16 +16,16 @@ export interface WhoamiResult {
 export type VerifyApiKey = (apiKey: string) => Promise<WhoamiResult | null>;
 
 // Builds (req: Request) => Promise<Response>. verifyApiKey maps a raw
-// post_sk_ key to its owner or null; in production it is a whoami query
+// kite_sk_ key to its owner or null; in production it is a whoami query
 // against Convex.
 export function buildMcpHandler(opts: {
   verifyApiKey: VerifyApiKey;
-  backendFor: (apiKey: string) => PostBackend;
+  backendFor: (apiKey: string) => KiteBackend;
   version: string;
 }) {
   const handler = createMcpHandler(
     (server) => {
-      registerPostTools(server, (ctx: ServerContext) => {
+      registerKiteTools(server, (ctx: ServerContext) => {
         const apiKey = ctx.http?.authInfo?.extra?.apiKey;
         if (typeof apiKey !== "string" || !apiKey) {
           throw new Error("Missing API key");
@@ -35,8 +35,8 @@ export function buildMcpHandler(opts: {
     },
     {
       serverInfo: {
-        name: "post",
-        title: "Post Mail",
+        name: "kite",
+        title: "Kite Mail",
         version: opts.version,
       } as { name: string; version: string },
       instructions: SERVER_INSTRUCTIONS,

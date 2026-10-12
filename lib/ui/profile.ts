@@ -4,8 +4,8 @@ export interface ProfileFields {
   imageUrl?: string;
 }
 
-export const DEV_PROFILE_KEY = "post.dev-profile";
-export const DEV_PROFILE_EVENT = "post:dev-profile";
+export const DEV_PROFILE_KEY = "kite.dev-profile";
+export const DEV_PROFILE_EVENT = "kite:dev-profile";
 export const DEFAULT_DEV_PROFILE: ProfileFields = { firstName: "Dev", lastName: "user" };
 export const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);

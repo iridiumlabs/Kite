@@ -288,13 +288,13 @@ export function ReaderContainer({
     const r = () => latest && onReply(latest);
     const ra = () => latest && onReplyAll(latest);
     const f = () => latest && onForward(latest);
-    window.addEventListener("post:reply", r);
-    window.addEventListener("post:replyAll", ra);
-    window.addEventListener("post:forward", f);
+    window.addEventListener("kite:reply", r);
+    window.addEventListener("kite:replyAll", ra);
+    window.addEventListener("kite:forward", f);
     return () => {
-      window.removeEventListener("post:reply", r);
-      window.removeEventListener("post:replyAll", ra);
-      window.removeEventListener("post:forward", f);
+      window.removeEventListener("kite:reply", r);
+      window.removeEventListener("kite:replyAll", ra);
+      window.removeEventListener("kite:forward", f);
     };
   }, [latest, onReply, onReplyAll, onForward]);
 

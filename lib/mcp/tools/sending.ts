@@ -1,7 +1,7 @@
 // Sending tools: new mail, replies, forwards. All send for real over SMTP.
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/server";
-import type { PostBackend, SendResult } from "../backend";
+import type { KiteBackend, SendResult } from "../backend";
 import {
   addTool,
   toAddress,
@@ -13,7 +13,7 @@ import {
 } from "./common";
 
 async function sendOutcome(
-  backend: PostBackend,
+  backend: KiteBackend,
   res: SendResult,
 ): Promise<{
   messageId: string | null;

@@ -116,7 +116,7 @@ function GeneralTab() {
           onChange={(v) => void update({ loadRemoteImages: v }).catch(() => toast.error("Could not save image preference."))}
         />
       </Row>
-      <Row label="Undo send" hint="Delay before a sent message leaves Post.">
+      <Row label="Undo send" hint="Delay before a sent message leaves Kite.">
         <div className="flex rounded-lg bg-search-field p-0.5 gap-0.5">
           {[0, 5, 10, 20].map((s) => (
             <button
@@ -493,7 +493,7 @@ function ApiKeysTab() {
         </div>
         <p className="mt-2 text-tertiary text-xs/4">
           This URL follows the site you are using. After deployment, open Settings
-          on your production domain to copy its MCP URL. Connect using a Post API
+          on your production domain to copy its MCP URL. Connect using a Kite API
           key as a Bearer token.
         </p>
       </div>

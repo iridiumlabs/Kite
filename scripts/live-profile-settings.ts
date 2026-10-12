@@ -4,8 +4,8 @@ import { ConvexHttpClient } from "convex/browser";
 import { chromium } from "playwright";
 import { api } from "../convex/_generated/api";
 
-const BASE = process.env.POST_UI_URL ?? "http://localhost:3000";
-const BACKEND = process.env.POST_CONVEX_URL ?? "http://127.0.0.1:3210";
+const BASE = process.env.KITE_UI_URL ?? "http://localhost:3000";
+const BACKEND = process.env.KITE_CONVEX_URL ?? "http://127.0.0.1:3210";
 
 async function main() {
   for (const url of [BASE, BACKEND]) assert.ok(["localhost", "127.0.0.1"].includes(new URL(url).hostname), "This test is local-only");

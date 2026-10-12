@@ -1,6 +1,6 @@
-# Post
+# Kite
 
-Post is a personal, Apple-inspired email client for multiple Spacemail (IMAP/SMTP) mailboxes,
+Kite is a personal, Apple-inspired email client for multiple Spacemail (IMAP/SMTP) mailboxes,
 with Jev-powered inbox classification and a first-class remote MCP server.
 
 Stack: Next.js 16 (App Router) + TypeScript + Tailwind v4, Clerk (auth), Convex (backend + DB),

@@ -1,6 +1,7 @@
 "use client";
 
 import { SignIn } from "@clerk/nextjs";
+import { KiteBrand } from "@/components/KiteBrand";
 
 const appearance = {
   elements: {
@@ -24,9 +25,7 @@ const appearance = {
 export function ClerkSignIn() {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center bg-app gap-8">
-      <div className="font-semibold text-primary text-2xl tracking-[-0.02em]">
-        Post
-      </div>
+      <KiteBrand />
       <SignIn appearance={appearance} routing="path" path="/sign-in" />
     </main>
   );

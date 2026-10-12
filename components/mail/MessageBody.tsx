@@ -133,8 +133,8 @@ export function MessageBody({
           }
         } catch { /* Cross-origin stylesheets cannot be inspected. */ }
       }
-      const style = doc.getElementById("post-fonts") ?? doc.createElement("style");
-      style.id = "post-fonts";
+      const style = doc.getElementById("kite-fonts") ?? doc.createElement("style");
+      style.id = "kite-fonts";
       style.textContent = `${faces.join("\n")} body { font-family: ${getComputedStyle(document.body).fontFamily}; }`;
       if (!style.isConnected) doc.head.append(style);
       const measure = () => {

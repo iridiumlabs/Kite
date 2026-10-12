@@ -359,7 +359,7 @@ describe("auth", () => {
     const { id: keyId, key } = await asA.mutation(api.apiKeys.create, {
       name: "mcp",
     });
-    expect(key.startsWith("post_sk_")).toBe(true);
+    expect(key.startsWith("kite_sk_")).toBe(true);
 
     const counts = await t.query(api.mail.counts, { apiKey: key });
     expect(counts["unread:primary"]).toBe(1);

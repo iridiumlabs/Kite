@@ -49,7 +49,7 @@ export interface IngestInput {
   classificationCategories?: { id: Id<"categories">; name: string; description: string }[];
   classifyAttempts?: number;
   bulk?: boolean;
-  postDraftId?: string;
+  kiteDraftId?: string;
   sourceStorageId?: Id<"_storage">;
 }
 
@@ -232,7 +232,7 @@ export async function ingestMessage(
     classificationCategories: !thread?.inboxManual && input.needsClassification ? input.classificationCategories ?? [] : undefined,
     classifyAttempts: input.classifyAttempts ?? 0,
     bulk: input.bulk ?? false,
-    postDraftId: input.postDraftId,
+    kiteDraftId: input.kiteDraftId,
     sourceStorageId: input.sourceStorageId,
     searchText: buildSearchText(input),
   });

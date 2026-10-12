@@ -48,7 +48,7 @@ export async function buildDraftSource(
     const original = await ctx.runQuery(internal.send.messageForCompose, { messageId: draft.replyToMessageId });
     if (original) ({ inReplyTo, references } = threadingHeaders(original));
   }
-  const headers: Record<string, string> = { "X-Post-Draft-Id": draft.messageIdHeader };
+  const headers: Record<string, string> = { "X-Kite-Draft-Id": draft.messageIdHeader };
   if (inReplyTo) headers["In-Reply-To"] = `<${inReplyTo}>`;
   if (references?.length) headers["References"] = references.map(id => `<${id}>`).join(" ");
   const mail = new MailComposer({
@@ -149,7 +149,7 @@ export const pushDraftUnderLease = internalAction({
         );
         // APPENDUID is optional. Resolve the newest copy before marking clean,
         // and collect prior copies left by an interrupted/lost APPEND response.
-        const copies = await port.searchHeader(draftsPath, "X-Post-Draft-Id", draft.messageIdHeader);
+        const copies = await port.searchHeader(draftsPath, "X-Kite-Draft-Id", draft.messageIdHeader);
         const uid = appended.uid ?? (copies.length ? Math.max(...copies) : undefined);
         if (uid === undefined) throw new Error("Draft APPEND could not be reconciled");
         const prevUid: number | undefined = draft.remoteUid;

@@ -13,7 +13,7 @@ export function HomeGate() {
   }, [isLoaded, isSignedIn, router]);
   return (
     <main className="flex h-dvh items-center justify-center bg-app">
-      <div className="text-tertiary text-[13px]/4">Post</div>
+      <div className="text-tertiary text-[13px]/4">Kite</div>
     </main>
   );
 }

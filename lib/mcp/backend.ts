@@ -101,7 +101,7 @@ export interface ThreadTargets {
   messageIds?: string[];
 }
 
-export interface PostBackend {
+export interface KiteBackend {
   listAccounts(): Promise<AccountDoc[]>;
   syncNow(accountId?: string): Promise<{ scheduled: number }>;
   loadOlder(
@@ -182,7 +182,7 @@ export interface PostBackend {
   scheduleDraft(draftId: string, at: number): Promise<void>;
   cancelScheduledDraft(draftId: string): Promise<void>;
   uncertainDraftAttempts(draftId: string): Promise<{ sendLogId: string; messageIdHeader: string; createdAt: number; canConfirmDelivered: boolean; canConfirmNotDelivered: boolean }[]>;
-  uncertainAccountAttempts(accountId: string): ReturnType<PostBackend["uncertainDraftAttempts"]>;
+  uncertainAccountAttempts(accountId: string): ReturnType<KiteBackend["uncertainDraftAttempts"]>;
   resolveUncertainSend(args: { sendLogId: string; outcome: "delivered" | "notDelivered"; confirmed: true }): Promise<{ outcome: "delivered" | "notDelivered" }>;
   resolveUncertainDraft(args: { draftId: string; sendLogId: string; outcome: "delivered" | "notDelivered"; confirmed: true }): Promise<{ outcome: "delivered" | "notDelivered" }>;
 
@@ -220,7 +220,7 @@ export interface PostBackend {
 // from convex/_generated.
 type ConvexFn = (path: string, args: object) => Promise<unknown>;
 
-export function convexBackend(apiKey: string, convexUrl: string): PostBackend {
+export function convexBackend(apiKey: string, convexUrl: string): KiteBackend {
   const client = new ConvexHttpClient(convexUrl);
   const query: ConvexFn = (p, a) =>
     client.query(p as never, { ...a, apiKey } as never);
@@ -311,10 +311,10 @@ export function convexBackend(apiKey: string, convexUrl: string): PostBackend {
     scheduleDraft: (draftId, at) =>
       mutation("drafts:scheduleSend", { draftId, at }) as Promise<void>,
     cancelScheduledDraft: draftId => mutation("drafts:cancelScheduledSend", { draftId }) as Promise<void>,
-    uncertainDraftAttempts: draftId => query("send:uncertainDraftAttempts", { draftId }) as ReturnType<PostBackend["uncertainDraftAttempts"]>,
-    uncertainAccountAttempts: accountId => query("send:uncertainAccountAttempts", { accountId }) as ReturnType<PostBackend["uncertainAccountAttempts"]>,
-    resolveUncertainSend: args => mutation("send:resolveUncertainSend", args) as ReturnType<PostBackend["resolveUncertainSend"]>,
-    resolveUncertainDraft: args => mutation("send:resolveUncertainDraft", args) as ReturnType<PostBackend["resolveUncertainDraft"]>,
+    uncertainDraftAttempts: draftId => query("send:uncertainDraftAttempts", { draftId }) as ReturnType<KiteBackend["uncertainDraftAttempts"]>,
+    uncertainAccountAttempts: accountId => query("send:uncertainAccountAttempts", { accountId }) as ReturnType<KiteBackend["uncertainAccountAttempts"]>,
+    resolveUncertainSend: args => mutation("send:resolveUncertainSend", args) as ReturnType<KiteBackend["resolveUncertainSend"]>,
+    resolveUncertainDraft: args => mutation("send:resolveUncertainDraft", args) as ReturnType<KiteBackend["resolveUncertainDraft"]>,
 
     setRead: (t, read) => mutation("mail:setRead", { ...t, read }) as Promise<void>,
     setStarred: (t, starred) =>

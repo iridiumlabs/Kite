@@ -79,7 +79,7 @@ const META_HEADERS = [
   "list-id",
   "precedence",
   "auto-submitted",
-  "x-post-draft-id",
+  "x-kite-draft-id",
 ];
 
 function parseHeaderBlock(raw: Buffer | string | undefined): Map<string, string[]> {
@@ -175,7 +175,7 @@ export function structureToMeta(m: FetchMessageObject): FetchedMeta | null {
   const listId = get("list-id");
   const precedence = get("precedence");
   const autoSubmitted = get("auto-submitted");
-  const postDraftId = get("x-post-draft-id");
+  const kiteDraftId = get("x-kite-draft-id");
 
   const messageId = env.messageId
     ? normalizeMessageId(env.messageId)
@@ -218,7 +218,7 @@ export function structureToMeta(m: FetchMessageObject): FetchedMeta | null {
       precedence,
       autoSubmitted,
     },
-    postDraftId: postDraftId?.trim() || undefined,
+    kiteDraftId: kiteDraftId?.trim() || undefined,
     hasAttachments: attachments.length > 0,
     attachments,
     textPartId: textPart?.part,

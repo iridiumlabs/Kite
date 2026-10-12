@@ -40,7 +40,7 @@ export interface FetchedMeta {
     precedence?: string;
     autoSubmitted?: string;
   };
-  postDraftId?: string;
+  kiteDraftId?: string;
   hasAttachments: boolean;
   attachments: {
     id: string;
@@ -184,7 +184,7 @@ export interface StoredMsgRef {
   folderId: string | null;
   folderRole: string;
   threadId: string;
-  postDraftId?: string;
+  kiteDraftId?: string;
   attachments?: {
     id: string;
     filename: string;
@@ -235,7 +235,7 @@ export interface IngestMessageArg {
   classificationCategories?: { id: string; name: string; description: string }[];
   classifyAttempts?: number;
   bulk?: boolean;
-  postDraftId?: string;
+  kiteDraftId?: string;
 }
 
 export interface FlagOpItem {

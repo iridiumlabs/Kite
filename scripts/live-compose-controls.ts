@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 
-const BASE = process.env.POST_UI_URL ?? "http://localhost:3000";
+const BASE = process.env.KITE_UI_URL ?? "http://localhost:3000";
 
 async function main() {
   assert.ok(["localhost", "127.0.0.1"].includes(new URL(BASE).hostname), "This test is local-only");

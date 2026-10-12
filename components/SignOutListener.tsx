@@ -7,8 +7,8 @@ export function SignOutListener() {
   const { signOut } = useAuth();
   useEffect(() => {
     const fn = () => void signOut();
-    window.addEventListener("post:signout", fn);
-    return () => window.removeEventListener("post:signout", fn);
+    window.addEventListener("kite:signout", fn);
+    return () => window.removeEventListener("kite:signout", fn);
   }, [signOut]);
   return null;
 }

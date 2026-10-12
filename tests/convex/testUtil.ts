@@ -123,7 +123,7 @@ export interface TestMessage {
   needsClassification?: boolean;
   classifyAttempts?: number;
   bulk?: boolean;
-  postDraftId?: string;
+  kiteDraftId?: string;
   sourceStorageId?: Id<"_storage">;
 }
 

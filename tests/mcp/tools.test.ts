@@ -1,11 +1,11 @@
 // @vitest-environment node
 // In-memory MCP tests: a real SDK Client talks to the real registered server
-// over a linked transport pair, with a fake PostBackend behind it.
+// over a linked transport pair, with a fake KiteBackend behind it.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
-import { registerPostTools } from "../../lib/mcp/server";
-import type { PostBackend } from "../../lib/mcp/backend";
+import { registerKiteTools } from "../../lib/mcp/server";
+import type { KiteBackend } from "../../lib/mcp/backend";
 import type {
   AccountDoc,
   CategoryDoc,
@@ -114,7 +114,7 @@ function makeMessage(id: string, threadId = "th1", date = 1700000000000): Messag
   };
 }
 
-function makeBackend(): PostBackend & {
+function makeBackend(): KiteBackend & {
   calls: { m: string; args: unknown[] }[];
 } {
   const calls: { m: string; args: unknown[] }[] = [];
@@ -244,7 +244,7 @@ function makeBackend(): PostBackend & {
     updateCategory: rec("updateCategory", async () => {}),
     removeCategory: rec("removeCategory", async () => {}),
   };
-  return backend as PostBackend & {
+  return backend as KiteBackend & {
     calls: { m: string; args: unknown[] }[];
   };
 }
@@ -255,8 +255,8 @@ const backend = makeBackend();
 
 beforeAll(async () => {
   const [ct, st] = InMemoryTransport.createLinkedPair();
-  serverConn = new McpServer({ name: "post", version: "0.1.0" });
-  registerPostTools(serverConn, () => backend);
+  serverConn = new McpServer({ name: "kite", version: "0.1.0" });
+  registerKiteTools(serverConn, () => backend);
   await serverConn.connect(st);
   client = new Client({ name: "test", version: "0.0.1" });
   await client.connect(ct);
@@ -419,8 +419,9 @@ describe("read tools", () => {
     });
     const resItem = (res.content as {
       type: string;
-      resource?: { blob: string; mimeType: string };
+      resource?: { blob: string; mimeType: string; uri: string };
     }[]).find((c) => c.type === "resource");
+    expect(resItem?.resource?.uri).toBe("kite://attachment/m1/pdf");
     expect(resItem?.resource?.mimeType).toBe("application/pdf");
     expect(atob(resItem!.resource!.blob)).toEqual("%PDF");
   });
