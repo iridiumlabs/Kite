@@ -41,6 +41,7 @@ test("the SVG source and Apple home-screen icon are available", () => {
   expect(svg).toContain("<title>Kite</title>");
   expect(svg).toContain('viewBox="0 0 64 64"');
   expect(svg).toContain("#007AFF");
+  expect(svg).not.toMatch(/<(?:rect|image)\b/);
   const png = asset("apple-icon.png");
   expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
   expect(png.readUInt32BE(16)).toBe(180);
