@@ -4,7 +4,6 @@ out/
 .env
 .env*.local
 !.env.example
-convex/_generated/
 *.tsbuildinfo
 .DS_Store
 artifacts/
