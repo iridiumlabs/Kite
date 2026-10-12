@@ -322,6 +322,8 @@ export default defineSchema({
     payload: v.any(),
     attempts: v.number(),
     nextAttemptAt: v.number(),
+    // Original queue order, retained when legacy bulk operations are split.
+    queueOrder: v.optional(v.number()),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
   })

@@ -28,7 +28,7 @@ test("changing the draft sender account clears the old remote location and queue
   const draft = await user.query(api.drafts.get, { draftId });
   expect(draft?.accountId).toBe(b);
   expect(draft?.remoteUid).toBeUndefined();
-  const ops = await t.query(internal.syncStore.dueOps, { accountId: a, now: Date.now() });
+  const ops = await t.mutation(internal.syncStore.dueOps, { accountId: a, now: Date.now() });
   expect(ops.some(op => op.kind === "deleteRemoteDraft" && op.payload.uid === 10)).toBe(true);
   expect(await t.mutation(internal.syncStore.markDraftPushed, { draftId, folderId: folders.drafts, uid: 11, pushedAccountId: a })).toBeNull();
 });

@@ -1,6 +1,24 @@
 import { MutationCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
+import type { PendingOpDoc, PendingOpPayload } from "../lib/ports";
+
+// Each remote target owns its retry state; one missing message must not hold
+// the rest of a bulk action hostage.
+export function splitOpPayload(kind: PendingOpDoc["kind"], payload: PendingOpPayload): PendingOpPayload[] {
+  if (kind === "flags") return (payload.updates ?? []).map(item => ({ updates: [item] }));
+  if (kind === "move") return (payload.moves ?? []).map(item => ({ moves: [item] }));
+  if (kind === "expunge") return (payload.expunges ?? []).map(item => ({ expunges: [item] }));
+  return [payload];
+}
+
+export function opTargetKey(kind: PendingOpDoc["kind"], payload: PendingOpPayload): string {
+  const item = payload.updates?.[0] ?? payload.moves?.[0] ?? payload.expunges?.[0];
+  if (item?.messageId) return `message:${item.messageId}`;
+  if (item) return `remote:${JSON.stringify([item.folderPath, item.uid])}`;
+  if (payload.draftId) return `draft:${payload.draftId}`;
+  return `${kind}:${JSON.stringify([payload.folderPath, payload.uid])}`;
+}
 
 // Per-kind payload shapes stored in pendingOps.payload. The node ops action
 // (phase 2) interprets these against IMAP.
@@ -42,14 +60,16 @@ export async function enqueueOp<K extends PendingOpKind>(
     payload: PendingOpPayloads[K];
   },
 ): Promise<void> {
-  await ctx.db.insert("pendingOps", {
-    userId: args.userId,
-    accountId: args.accountId,
-    kind: args.kind,
-    payload: args.payload,
-    attempts: 0,
-    nextAttemptAt: Date.now(),
-    createdAt: Date.now(),
-  });
+  for (const payload of splitOpPayload(args.kind, args.payload as PendingOpPayload)) {
+    await ctx.db.insert("pendingOps", {
+      userId: args.userId,
+      accountId: args.accountId,
+      kind: args.kind,
+      payload,
+      attempts: 0,
+      nextAttemptAt: Date.now(),
+      createdAt: Date.now(),
+    });
+  }
   await ctx.scheduler.runAfter(0, internal.node.ops.processOps, {});
 }

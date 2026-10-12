@@ -9,6 +9,7 @@ import { internal } from "./_generated/api";
 import { ingestMessage } from "./model/ingest";
 import { recomputeThread } from "./model/threads";
 import { addressV } from "./validators";
+import { opTargetKey, splitOpPayload } from "./model/pendingOps";
 
 const ingestMessageV = v.object({
   uid: v.optional(v.number()),
@@ -138,15 +139,40 @@ export const folderByRole = internalQuery({
   },
 });
 
-export const dueOps = internalQuery({
+export const dueOps = internalMutation({
   args: { accountId: v.id("accounts"), now: v.number() },
   handler: async (ctx, args) => {
-    return await ctx.db
-      .query("pendingOps")
-      .withIndex("by_account_next", (q) =>
-        q.eq("accountId", args.accountId).lte("nextAttemptAt", args.now),
-      )
-      .take(100);
+    const pending = await ctx.db.query("pendingOps")
+      .withIndex("by_account_next", q => q.eq("accountId", args.accountId))
+      .collect();
+    const singletons: Doc<"pendingOps">[] = [];
+    for (const op of pending) {
+      const payloads = splitOpPayload(op.kind, op.payload);
+      if (payloads.length === 1) {
+        singletons.push(op);
+        continue;
+      }
+      // Normalize pre-deployment batches atomically, preserving their order
+      // relative to newer actions, even if the old batch is in backoff.
+      const { _id, _creationTime, ...fields } = op;
+      for (const payload of payloads) {
+        const id = await ctx.db.insert("pendingOps", {
+          ...fields, payload, queueOrder: op.queueOrder ?? _creationTime,
+        });
+        singletons.push((await ctx.db.get(id))!);
+      }
+      await ctx.db.delete(_id);
+    }
+    singletons.sort((a, b) => (a.queueOrder ?? a._creationTime) - (b.queueOrder ?? b._creationTime));
+    const occupied = new Set<string>();
+    const due: Doc<"pendingOps">[] = [];
+    for (const op of singletons) {
+      const key = opTargetKey(op.kind, op.payload);
+      if (occupied.has(key)) continue;
+      occupied.add(key); // Include not-yet-due predecessors in the barrier.
+      if (op.nextAttemptAt <= args.now && due.length < 100) due.push(op);
+    }
+    return due;
   },
 });
 

@@ -938,24 +938,29 @@ export async function runPendingOps(
   caps?: SyncCapabilities,
 ): Promise<number> {
   const caps_ = caps ?? (await deps.imap.capabilities());
-  const ops = await deps.store.dueOps(deps.now());
   let done = 0;
-  for (const op of ops) {
-    try {
-      await executeOp(deps, op, caps_);
-      await deps.store.completeOp(op._id);
-      done++;
-    } catch (err) {
-      const waiting = err instanceof PendingTargetError;
-      const drop = !waiting && op.attempts + 1 >= 8;
-      const delay = Math.min(5000 * Math.pow(2, op.attempts), 30 * 60 * 1000);
-      await deps.store.failOp(
-        op._id,
-        err instanceof Error ? err.message.slice(0, 200) : "operation failed",
-        deps.now() + delay,
-        drop,
-        waiting,
-      );
+  // Drain newly unblocked successors in this run, but bound work per lease.
+  for (let processed = 0; processed < 100;) {
+    const ops = await deps.store.dueOps(deps.now());
+    if (ops.length === 0) break;
+    for (const op of ops) {
+      if (processed++ >= 100) break;
+      try {
+        await executeOp(deps, op, caps_);
+        await deps.store.completeOp(op._id);
+        done++;
+      } catch (err) {
+        const waiting = err instanceof PendingTargetError;
+        const drop = !waiting && op.attempts + 1 >= 8;
+        const delay = Math.min(5000 * Math.pow(2, op.attempts), 30 * 60 * 1000);
+        await deps.store.failOp(
+          op._id,
+          err instanceof Error ? err.message.slice(0, 200) : "operation failed",
+          deps.now() + delay,
+          drop,
+          waiting,
+        );
+      }
     }
   }
   return done;

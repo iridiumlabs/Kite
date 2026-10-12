@@ -1041,8 +1041,9 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     const messages = await allMessages(t);
     await t.withIdentity({ subject: USER }).mutation(api.mail.archive, { threadIds: messages.map(m => m.threadId) });
     now.t = Date.now();
-    // Assert immediately after the batch, before a full sync can repair it.
-    expect(await runPendingOps(deps, imap.caps)).toBe(1);
+    // Bulk actions now have one independently retryable op per message.
+    // Assert before a full sync can repair any missing folder-state update.
+    expect(await runPendingOps(deps, imap.caps)).toBe(3);
     expect(imap.mailbox("INBOX").messages.size).toBe(0);
     expect(imap.mailbox("Archive").messages.size).toBe(3);
     expect((await folderByRole(t, accountId, "inbox")).syncedUids).toBe("");
@@ -1176,6 +1177,79 @@ describe("sync engine integration (fake IMAP, real Convex)", () => {
     await runAccountSync(deps);
     expect(await allMessages(t)).toHaveLength(1);
     expect(await t.run(ctx => ctx.db.get(message._id))).toMatchObject({ folderRole: "archive", uid: 1 });
+  });
+
+  test.each(["move", "flags"] as const)("a failed %s cannot be overtaken by a newer action on the same message", async kind => {
+    const { t, imap, deps, now } = await world();
+    imap.mailbox("INBOX").append(mailSource({ id: "ordered@t" }));
+    imap.mailbox("INBOX").append(mailSource({ id: "independent@t" }));
+    await runAccountSync(deps);
+    const message = (await allMessages(t)).find(m => m.messageIdHeader === "ordered@t")!;
+    const other = (await allMessages(t)).find(m => m.messageIdHeader === "independent@t")!;
+    const user = t.withIdentity({ subject: USER });
+    const method = kind === "move" ? "moveOrCopy" : "storeFlags";
+    const remote = vi.spyOn(imap, method).mockRejectedValueOnce(new Error("temporary IMAP failure"));
+    if (kind === "move") await user.mutation(api.mail.archive, { threadIds: [message.threadId] });
+    else await user.mutation(api.mail.setRead, { messageIds: [message._id], read: true });
+    now.t = Date.now();
+    expect(await runPendingOps(deps)).toBe(0);
+    if (kind === "move") await user.mutation(api.mail.trash, { threadIds: [message.threadId] });
+    else await user.mutation(api.mail.setRead, { messageIds: [message._id], read: false });
+    await user.mutation(api.mail.setStarred, { messageIds: [other._id], starred: true });
+    now.t = Date.now();
+    expect(await runPendingOps(deps)).toBe(1); // Unrelated targets are not blocked.
+    expect(remote).toHaveBeenCalledTimes(kind === "move" ? 1 : 2);
+    remote.mockRestore();
+    now.t += 60000;
+    expect(await runPendingOps(deps)).toBe(2); // Predecessor, then successor.
+    if (kind === "move") {
+      expect(imap.mailbox("Archive").messages.size).toBe(0);
+      expect(imap.mailbox("Trash").messages.size).toBe(1);
+      expect(await t.run(ctx => ctx.db.get(message._id))).toMatchObject({ folderRole: "trash" });
+    } else {
+      expect(imap.mailbox("INBOX").messages.get(message.uid!)!.flags.has("seen")).toBe(false);
+    }
+    expect(await t.run(ctx => ctx.db.query("pendingOps").collect())).toHaveLength(0);
+  });
+
+  test.each(["flags", "move", "expunge"] as const)("legacy bulk %s isolates missing and ambiguous targets", async kind => {
+    const { t, accountId, imap, deps, now } = await world();
+    imap.mailbox("INBOX").append(mailSource({ id: "missing-bulk@t" }));
+    imap.mailbox("INBOX").append(mailSource({ id: "ambiguous-bulk@t" }));
+    imap.mailbox("INBOX").append(mailSource({ id: "valid-bulk@t" }));
+    await runAccountSync(deps);
+    const messages = await allMessages(t);
+    const missing = messages.find(m => m.messageIdHeader === "missing-bulk@t")!;
+    const ambiguous = messages.find(m => m.messageIdHeader === "ambiguous-bulk@t")!;
+    const valid = messages.find(m => m.messageIdHeader === "valid-bulk@t")!;
+    imap.mailbox("INBOX").messages.delete(missing.uid!);
+    imap.mailbox("INBOX").append(mailSource({ id: ambiguous.messageIdHeader }));
+    await t.run(async ctx => {
+      await ctx.db.patch(missing._id, { uid: undefined });
+      await ctx.db.patch(ambiguous._id, { uid: undefined });
+      const items = [missing, ambiguous, valid].map(m => ({
+        folderPath: "INBOX", messageId: m._id, messageIdHeader: m.messageIdHeader,
+        ...(kind === "flags" ? { add: ["\\Seen"], remove: [] } : {}),
+        ...(kind === "move" ? { targetRole: "archive" } : {}),
+      }));
+      await ctx.db.insert("pendingOps", {
+        userId: USER, accountId, kind,
+        payload: { [kind === "flags" ? "updates" : kind === "move" ? "moves" : "expunges"]: items },
+        attempts: 0, nextAttemptAt: 0, createdAt: Date.now(),
+      });
+    });
+    now.t = Date.now();
+    expect(await runPendingOps(deps)).toBe(1);
+    const pending = await t.run(ctx => ctx.db.query("pendingOps").collect());
+    expect(pending).toHaveLength(2);
+    expect(pending.every(op => op.attempts === 0)).toBe(true);
+    if (kind === "flags") expect(imap.mailbox("INBOX").messages.get(valid.uid!)!.flags.has("seen")).toBe(true);
+    if (kind === "move") expect(imap.mailbox("Archive").messages.size).toBe(1);
+    if (kind === "expunge") expect(imap.mailbox("INBOX").messages.has(valid.uid!)).toBe(false);
+    // Finishing siblings are durably removed, not re-executed on retry.
+    now.t += 60000;
+    expect(await runPendingOps(deps)).toBe(0);
+    expect(await t.run(ctx => ctx.db.query("pendingOps").collect())).toHaveLength(2);
   });
 
   test("foreign-client remote drafts are imported only once", async () => {

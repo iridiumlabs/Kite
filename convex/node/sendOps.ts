@@ -12,6 +12,20 @@ import { connectImap, FlowPort, accountToImapConfig } from "./imap";
 import { decryptCredentials } from "./crypto";
 import { smtpTransport } from "./accountsOps";
 import type { Address } from "../lib/types";
+import type { ImapPort } from "../lib/ports";
+
+// HEADER searches can return substring matches; verify exact identity.
+// Adapters without header search scan the entire folder in bounded batches.
+async function findSentUid(port: ImapPort, path: string, messageIdHeader: string): Promise<number | undefined> {
+  const hits = port.searchHeader
+    ? await port.searchHeader(path, "Message-ID", messageIdHeader)
+    : await port.searchUids(path);
+  for (let i = 0; i < hits.length; i += 50) {
+    for await (const meta of port.fetchMeta(path, hits.slice(i, i + 50))) {
+      if (meta.messageIdHeader === messageIdHeader) return meta.uid;
+    }
+  }
+}
 
 const SENT_SEARCH_WAIT_MS = 2000;
 const ATTACHMENT_TOTAL_MAX = 25 * 1024 * 1024;
@@ -263,17 +277,7 @@ export const performSend = internalAction({
           path: sentPath,
           role: "sent",
         });
-        const hits = await port.searchUids(sentPath);
-        if (hits.length > 0) {
-          const metas: { uid: number; messageIdHeader: string }[] = [];
-          for await (const m of port.fetchMeta(sentPath, hits.slice(-25))) {
-            metas.push(m);
-          }
-          const found = metas.find(
-            (m) => m.messageIdHeader === args.messageIdHeader,
-          );
-          sentUid = found?.uid;
-        }
+        sentUid = await findSentUid(port, sentPath, args.messageIdHeader);
         if (sentUid === undefined) {
           const res = await port.append(sentPath, sentSource, ["\\Seen"]);
           sentUid = res.uid;
@@ -378,18 +382,7 @@ export const retrySentAppend = internalAction({
           role: "sent",
         });
 
-        let sentUid: number | undefined;
-        const hits = await port.searchUids(sentPath);
-        if (hits.length > 0) {
-          const metas: { uid: number; messageIdHeader: string }[] = [];
-          for await (const m of port.fetchMeta(sentPath, hits.slice(-25))) {
-            metas.push(m);
-          }
-          const found = metas.find(
-            (m) => m.messageIdHeader === args.messageIdHeader,
-          );
-          sentUid = found?.uid;
-        }
+        let sentUid = await findSentUid(port, sentPath, args.messageIdHeader);
 
         if (sentUid === undefined) {
           const res = await port.append(sentPath, source, ["\\Seen"]);

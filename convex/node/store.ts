@@ -122,7 +122,7 @@ export function makeStorePort(ctx: Ctx, accountId: Id<"accounts">): StorePort {
       );
     },
     async dueOps(now) {
-      return (await ctx.runQuery(internal.syncStore.dueOps, {
+      return (await ctx.runMutation(internal.syncStore.dueOps, {
         accountId,
         now,
       })) as never;

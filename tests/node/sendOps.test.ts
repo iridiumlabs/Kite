@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { getFunctionName, type FunctionArgs } from "convex/server";
 import type { ActionCtx } from "../../convex/_generated/server";
 import { internal } from "../../convex/_generated/api";
-import { performSend } from "../../convex/node/sendOps";
+import { performSend, retrySentAppend } from "../../convex/node/sendOps";
 import type { Id } from "../../convex/_generated/dataModel";
 import { MailParserPort } from "../../convex/node/mailParser";
 
@@ -159,6 +159,48 @@ test("performSend retains Bcc headers in IMAP append while stripping them from S
   expect(appendMock).toHaveBeenCalledOnce();
   const imapRaw = (appendMock.mock.calls[0][1] as Buffer).toString();
   expect(imapRaw).toMatch(/^Bcc:\s*bcc@x\.com/mi);
+});
+
+test.each(["header", "fallback"])("Sent recovery finds old copies with %s search and never appends a duplicate", async mode => {
+  const { FlowPort, connectImap } = await import("../../convex/node/imap");
+  const append = vi.fn().mockResolvedValue({ uid: 200 });
+  const searchHeader = vi.fn().mockResolvedValue([1, 2]);
+  const searchUids = vi.fn().mockResolvedValue(Array.from({ length: 120 }, (_, i) => i + 1));
+  const fetchMeta = vi.fn(async function* (_path: string, uids: number[]) {
+    for (const uid of uids) yield {
+      uid, messageIdHeader: uid === 2 ? "old-sent@x" : "prefix-old-sent@x",
+    };
+  });
+  (connectImap as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ logout: vi.fn().mockResolvedValue(undefined), close: vi.fn() });
+  (FlowPort as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+    return { searchHeader: mode === "header" ? searchHeader : undefined, searchUids, fetchMeta, append };
+  });
+  const ctx = {
+    runQuery: vi.fn(async ref => {
+      const name = getFunctionName(ref);
+      if (name === "syncStore:messageRemoteRef") return { message: { uid: undefined, folderId: null } };
+      if (name === "syncStore:getAccountDoc") return { email: "me@x.com", displayName: "Me" };
+      if (name === "syncStore:folderByRole") return { path: "Sent" };
+      return {};
+    }),
+    runMutation: h.mutation,
+    storage: { get: vi.fn().mockResolvedValue(new Blob(["persisted MIME"])), delete: vi.fn() },
+    scheduler: { runAfter: vi.fn() },
+  } as unknown as ActionCtx;
+  const args: FunctionArgs<typeof internal.node.sendOps.retrySentAppend> = {
+    messageId: "message" as Id<"messages">, accountId: "account" as Id<"accounts">,
+    sourceStorageId: "source" as Id<"_storage">, messageIdHeader: "old-sent@x", attempt: 3,
+  };
+  const handler = (retrySentAppend as unknown as { handler: (ctx: ActionCtx, input: typeof args) => Promise<unknown> }).handler;
+  await handler(ctx, args);
+  expect(append).not.toHaveBeenCalled();
+  expect(h.mutation).toHaveBeenCalledWith(internal.send.recordSentAppendSuccess, expect.objectContaining({ uid: 2 }));
+  if (mode === "header") {
+    expect(searchHeader).toHaveBeenCalledWith("Sent", "Message-ID", "old-sent@x");
+    expect(searchUids).not.toHaveBeenCalled();
+  } else {
+    expect(fetchMeta).toHaveBeenCalledWith("Sent", Array.from({ length: 50 }, (_, i) => i + 1));
+  }
 });
 
 test("performSend persists raw source to storage for retry when IMAP Sent append fails", async () => {
