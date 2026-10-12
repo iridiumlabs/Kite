@@ -9,7 +9,7 @@ import { internal } from "./_generated/api";
 import { ingestMessage } from "./model/ingest";
 import { recomputeThread } from "./model/threads";
 import { addressV } from "./validators";
-import { opTargetKey, splitOpPayload } from "./model/pendingOps";
+import { migrateOps, refreshAccountOps, refreshTargetQueue } from "./model/pendingOps";
 
 const ingestMessageV = v.object({
   uid: v.optional(v.number()),
@@ -142,35 +142,26 @@ export const folderByRole = internalQuery({
 export const dueOps = internalMutation({
   args: { accountId: v.id("accounts"), now: v.number() },
   handler: async (ctx, args) => {
-    const pending = await ctx.db.query("pendingOps")
-      .withIndex("by_account_next", q => q.eq("accountId", args.accountId))
-      .collect();
-    const singletons: Doc<"pendingOps">[] = [];
-    for (const op of pending) {
-      const payloads = splitOpPayload(op.kind, op.payload);
-      if (payloads.length === 1) {
-        singletons.push(op);
-        continue;
-      }
-      // Normalize pre-deployment batches atomically, preserving their order
-      // relative to newer actions, even if the old batch is in backoff.
-      const { _id, _creationTime, ...fields } = op;
-      for (const payload of payloads) {
-        const id = await ctx.db.insert("pendingOps", {
-          ...fields, payload, queueOrder: op.queueOrder ?? _creationTime,
-        });
-        singletons.push((await ctx.db.get(id))!);
-      }
-      await ctx.db.delete(_id);
+    const legacy = await ctx.db.query("pendingOps")
+      .withIndex("by_account_target_next", q => q.eq("accountId", args.accountId).eq("targetKey", undefined))
+      .take(4);
+    await migrateOps(ctx, legacy);
+    // No head may run until older, unindexed predecessors are migrated.
+    const remaining = await ctx.db.query("pendingOps")
+      .withIndex("by_account_target_next", q => q.eq("accountId", args.accountId).eq("targetKey", undefined)).first();
+    if (remaining) {
+      await ctx.scheduler.runAfter(1000, internal.node.ops.processOps, {});
+      return [];
     }
-    singletons.sort((a, b) => (a.queueOrder ?? a._creationTime) - (b.queueOrder ?? b._creationTime));
-    const occupied = new Set<string>();
+    const account = await ctx.db.get(args.accountId);
+    if ((account?.opsBackoffUntil ?? 0) > args.now) return [];
+    const queues = await ctx.db.query("opQueues")
+      .withIndex("by_account_next", q => q.eq("accountId", args.accountId).lte("nextAttemptAt", args.now))
+      .take(100);
     const due: Doc<"pendingOps">[] = [];
-    for (const op of singletons) {
-      const key = opTargetKey(op.kind, op.payload);
-      if (occupied.has(key)) continue;
-      occupied.add(key); // Include not-yet-due predecessors in the barrier.
-      if (op.nextAttemptAt <= args.now && due.length < 100) due.push(op);
+    for (const queue of queues) {
+      const op = await ctx.db.get(queue.headOpId);
+      if (op) due.push(op);
     }
     return due;
   },
@@ -761,17 +752,51 @@ export const updateAccountSync = internalMutation({
   },
 });
 
-export const accountsWithDueOps = internalQuery({
+export const accountsWithDueOps = internalMutation({
   args: { now: v.number() },
   handler: async (ctx, args) => {
-    const ops = await ctx.db.query("pendingOps")
-      .withIndex("by_next", q => q.lte("nextAttemptAt", args.now))
-      .take(100);
-    const ids = new Set<Id<"accounts">>();
-    for (const op of ops) {
-      if (op.nextAttemptAt <= args.now) ids.add(op.accountId);
+    // Roll legacy records into indexed target/account schedules without
+    // connecting to their servers. Outages cannot stall the migration.
+    const legacy = await ctx.db.query("pendingOps")
+      .withIndex("by_target_next", q => q.eq("targetKey", undefined)).take(4);
+    const idle: Doc<"pendingOps">[] = [];
+    for (const op of legacy) {
+      const lock = await ctx.db.query("syncLocks").withIndex("by_account", q => q.eq("accountId", op.accountId)).first();
+      // During rolling deployment an older worker can still hold these IDs.
+      // Its own dueOps call can migrate safely between remote operations.
+      if (!lock || lock.leaseUntil <= args.now) idle.push(op);
     }
-    return [...ids];
+    await migrateOps(ctx, idle);
+    if (legacy.length) await ctx.scheduler.runAfter(1000, internal.node.ops.processOps, {});
+    const accounts = await ctx.db.query("accounts")
+      .withIndex("by_ops_next", q => q.gte("opsNextAttemptAt", 0).lte("opsNextAttemptAt", args.now))
+      .take(100);
+    return accounts.map(account => account._id);
+  },
+});
+
+export const backoffAccountOps = internalMutation({
+  args: { accountId: v.id("accounts"), error: v.string(), now: v.number() },
+  handler: async (ctx, args) => {
+    const account = await ctx.db.get(args.accountId);
+    if (!account) return;
+    const failures = (account.opsConnectFailures ?? 0) + 1;
+    const delay = Math.min(30_000 * Math.pow(2, Math.min(failures - 1, 6)), 30 * 60_000);
+    await ctx.db.patch(args.accountId, {
+      opsConnectFailures: failures, opsBackoffUntil: args.now + delay,
+      lastError: args.error.slice(0, 200),
+    });
+    await refreshAccountOps(ctx, args.accountId);
+  },
+});
+
+export const clearOpsBackoff = internalMutation({
+  args: { accountId: v.id("accounts") },
+  handler: async (ctx, args) => {
+    const account = await ctx.db.get(args.accountId);
+    if (!account || (account.opsConnectFailures === undefined && account.opsBackoffUntil === undefined)) return;
+    await ctx.db.patch(args.accountId, { opsConnectFailures: undefined, opsBackoffUntil: undefined });
+    await refreshAccountOps(ctx, args.accountId);
   },
 });
 
@@ -999,7 +1024,10 @@ export const completeOp = internalMutation({
   args: { opId: v.id("pendingOps") },
   handler: async (ctx, args) => {
     const op = await ctx.db.get(args.opId);
-    if (op) await ctx.db.delete(args.opId);
+    if (!op) return;
+    await ctx.db.delete(args.opId);
+    if (op.targetKey) await refreshTargetQueue(ctx, op.accountId, op.targetKey);
+    await refreshAccountOps(ctx, op.accountId);
   },
 });
 
@@ -1019,6 +1047,8 @@ export const failOp = internalMutation({
       await ctx.db.patch(op.accountId, {
         lastError: `Operation failed repeatedly: ${args.error}`,
       });
+      if (op.targetKey) await refreshTargetQueue(ctx, op.accountId, op.targetKey);
+      await refreshAccountOps(ctx, op.accountId);
       return;
     }
     await ctx.db.patch(args.opId, {
@@ -1026,6 +1056,8 @@ export const failOp = internalMutation({
       lastError: args.error,
       nextAttemptAt: args.nextAttemptAt,
     });
+    if (op.targetKey) await refreshTargetQueue(ctx, op.accountId, op.targetKey);
+    await refreshAccountOps(ctx, op.accountId);
   },
 });
 

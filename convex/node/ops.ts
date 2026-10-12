@@ -16,7 +16,7 @@ const LEASE_TTL_MS = 2 * 60 * 1000;
 export const processOps = internalAction({
   args: {},
   handler: async (ctx) => {
-    const accountIds = await ctx.runQuery(
+    const accountIds = await ctx.runMutation(
       internal.syncStore.accountsWithDueOps,
       { now: Date.now() },
     );
@@ -40,11 +40,12 @@ export const processOps = internalAction({
           internal.syncStore.getAccountSyncState,
           { accountId },
         );
-        if (!secret || !state) continue;
+        if (!secret || !state) throw new Error("Account credentials are unavailable");
         const { username, password } = decryptCredentials(secret);
         const cfg = accountToImapConfig(state.account);
         const client = await connectImap({ ...cfg, username, password });
         try {
+          await ctx.runMutation(internal.syncStore.clearOpsBackoff, { accountId });
           const imap = new FlowPort(client);
           const deps = {
             accountId: accountId as string,
@@ -66,11 +67,18 @@ export const processOps = internalAction({
         } finally {
           await client.logout().catch(() => client.close());
         }
+      } catch (error) {
+        // A bad connection must not abort the sweep or consume each message's
+        // retry budget. Account-level backoff also removes it from discovery.
+        await ctx.runMutation(internal.syncStore.backoffAccountOps, {
+          accountId, now: Date.now(),
+          error: error instanceof Error ? error.message : "IMAP connection failed",
+        }).catch(err => console.error(`[ops ${accountId}] could not persist backoff`, err));
       } finally {
         await ctx.runMutation(internal.syncStore.releaseLease, {
           accountId,
           owner,
-        });
+        }).catch(err => console.error(`[ops ${accountId}] could not release lease`, err));
       }
     }
     return { processed };

@@ -47,7 +47,7 @@ export const syncDueTick = internalAction({
 export const opsDueTick = internalAction({
   args: {},
   handler: async (ctx): Promise<{ scheduled: number }> => {
-    const ids = await ctx.runQuery(internal.syncStore.accountsWithDueOps, {
+    const ids = await ctx.runMutation(internal.syncStore.accountsWithDueOps, {
       now: Date.now(),
     });
     if (ids.length > 0) {

@@ -90,6 +90,9 @@ export const syncAccount = internalAction({
       if (!imap) return { skipped: "no-account" };
       try {
         const deps = makeEngineDeps(ctx, args.accountId, imap);
+        // A verified sync connection also recovers a previously offline
+        // operation queue without waiting for its account backoff to expire.
+        await ctx.runMutation(internal.syncStore.clearOpsBackoff, { accountId: args.accountId });
         const outcome = await runAccountSync(deps);
         // lastSyncedAt/initialSyncDone are owned by the engine: it writes
         // them only when the run changed something or the timestamp is

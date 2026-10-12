@@ -121,6 +121,9 @@ export const purgeAccountBatch = internalMutation({
       .withIndex("by_account_next", (q) => q.eq("accountId", args.accountId))
       .take(ROW_BATCH);
     for (const op of ops) await ctx.db.delete(op._id);
+    const queues = await ctx.db.query("opQueues")
+      .withIndex("by_account_next", q => q.eq("accountId", args.accountId)).take(ROW_BATCH);
+    for (const queue of queues) await ctx.db.delete(queue._id);
     const sendLogs = await ctx.db.query("sendLog")
       .withIndex("by_account", (q) => q.eq("accountId", args.accountId))
       .take(ROW_BATCH);
@@ -128,6 +131,7 @@ export const purgeAccountBatch = internalMutation({
     if (
       drafts.length === ROW_BATCH ||
       ops.length === ROW_BATCH ||
+      queues.length === ROW_BATCH ||
       sendLogs.length === ROW_BATCH
     ) {
       await ctx.scheduler.runAfter(

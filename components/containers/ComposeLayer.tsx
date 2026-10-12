@@ -742,9 +742,10 @@ function ComposePane({
     }
   };
 
-  const onClose = () => {
-    void save();
-    ui.closeCompose(win.id);
+  const onClose = async () => {
+    const id = await save();
+    // Failed persistence must never dismiss (and lose) the in-memory draft.
+    if (id && !discardedRef.current) ui.closeCompose(win.id);
   };
 
   const onInsertLink = () => {

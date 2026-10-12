@@ -163,6 +163,7 @@ export const snapshotForUser = internalQuery({
       "drafts",
       "counters",
       "pendingOps",
+      "opQueues",
       "sendLog",
       "accountSecrets",
     ] as const) {
@@ -201,6 +202,7 @@ export const purgeForUser = internalMutation({
       "drafts",
       "counters",
       "pendingOps",
+      "opQueues",
       "sendLog",
       "accountSecrets",
       "syncLocks",

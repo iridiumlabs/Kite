@@ -140,6 +140,32 @@ test("discard cancels an autosave waiting for forwarded attachments", async () =
   expect(h.mutations.get("drafts:discard")).not.toHaveBeenCalled();
 });
 
+test("closing a failed forward keeps recipients and body available for explicit discard", async () => {
+  h.content.mockRejectedValue(new Error("Original unavailable"));
+  h.effects = []; h.refs = []; render(); render(); await settle();
+  (props().toInput as ReactElement<{ onAdd: (chips: { email: string }[]) => void }>).props.onAdd([{ email: "to@x.com" }]);
+  h.onEditorUpdate!("<p>Keep my writing</p>", "Keep my writing");
+  const close = props().onClose;
+  await close(); await settle();
+  expect(h.close).not.toHaveBeenCalled();
+  expect(h.mutations.get("drafts:create")).not.toHaveBeenCalled();
+  expect(props().to).toMatchObject([{ email: "to@x.com" }]);
+  expect(h.error).toHaveBeenCalledWith(expect.stringContaining("Could not load forwarded attachments"));
+  props().onDiscard(); await settle();
+  expect(h.close).toHaveBeenCalledWith("window");
+});
+
+test("closing waits for the draft to be durably created", async () => {
+  h.content.mockResolvedValue({ attachments: [] });
+  h.effects = []; h.refs = []; render(); render(); await settle();
+  const create = deferred<string>();
+  h.mutations.get("drafts:create")!.mockReturnValue(create.promise);
+  const closing = props().onClose(); await settle();
+  expect(h.close).not.toHaveBeenCalled();
+  create.resolve("saved-draft"); await closing; await settle();
+  expect(h.close).toHaveBeenCalledWith("window");
+});
+
 test("discard deletes a draft whose create mutation was already running", async () => {
   h.content.mockResolvedValue({ attachments: [originalAttachment] });
   h.effects = []; h.refs = []; render(); render(); await settle();

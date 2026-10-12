@@ -71,6 +71,9 @@ export default defineSchema({
     initialSyncDone: v.boolean(),
     foldersDiscoveredAt: v.optional(v.number()),
     syncFailCount: v.optional(v.number()),
+    opsNextAttemptAt: v.optional(v.number()),
+    opsBackoffUntil: v.optional(v.number()),
+    opsConnectFailures: v.optional(v.number()),
     signatureHtml: v.optional(v.string()),
     capabilities: v.optional(
       v.object({
@@ -83,7 +86,9 @@ export default defineSchema({
     ),
     sortOrder: v.number(),
     createdAt: v.number(),
-  }).index("by_user", ["userId", "sortOrder"]),
+  })
+    .index("by_user", ["userId", "sortOrder"])
+    .index("by_ops_next", ["opsNextAttemptAt"]),
 
   accountSecrets: defineTable({
     accountId: v.id("accounts"),
@@ -324,11 +329,27 @@ export default defineSchema({
     nextAttemptAt: v.number(),
     // Original queue order, retained when legacy bulk operations are split.
     queueOrder: v.optional(v.number()),
+    targetKey: v.optional(v.string()),
     lastError: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_account_next", ["accountId", "nextAttemptAt"])
-    .index("by_next", ["nextAttemptAt"]),
+    .index("by_next", ["nextAttemptAt"])
+    .index("by_target_next", ["targetKey", "nextAttemptAt"])
+    .index("by_account_target_next", ["accountId", "targetKey", "nextAttemptAt"])
+    .index("by_account_target_order", ["accountId", "targetKey", "queueOrder"]),
+
+  // One durable runnable predecessor per remote target; selectors never
+  // need to read the backlog of superseding actions.
+  opQueues: defineTable({
+    userId: v.string(),
+    accountId: v.id("accounts"),
+    targetKey: v.string(),
+    headOpId: v.id("pendingOps"),
+    nextAttemptAt: v.number(),
+  })
+    .index("by_account_target", ["accountId", "targetKey"])
+    .index("by_account_next", ["accountId", "nextAttemptAt"]),
 
   sendLog: defineTable({
     userId: v.string(),
