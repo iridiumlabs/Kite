@@ -456,10 +456,14 @@ const TOOL_LIST = [
 
 function ApiKeysTab() {
   const keys = useQuery(api.apiKeys.list, {});
+  const activeKeys = keys?.filter(key => key.revokedAt === undefined);
   const create = useMutation(api.apiKeys.create);
-  const revoke = useMutation(api.apiKeys.revoke);
+  const revoke = useMutation(api.apiKeys.revoke).withOptimisticUpdate((store, args) => {
+    const current = store.getQuery(api.apiKeys.list, {});
+    if (current) store.setQuery(api.apiKeys.list, {}, current.filter(key => key._id !== args.apiKeyId));
+  });
   const [name, setName] = useState("");
-  const [newKey, setNewKey] = useState<string>();
+  const [newKey, setNewKey] = useState<{ id: Id<"apiKeys">; key: string }>();
   const [client, setClient] = useState<
     "claude-code" | "claude-desktop" | "cursor" | "codex" | "vscode"
   >("claude-code");
@@ -504,8 +508,8 @@ function ApiKeysTab() {
             Copy this key now. It will not be shown again.
           </div>
           <div className="flex items-center gap-1 mt-2 rounded-lg bg-app px-2.5 h-8">
-            <code className="grow text-primary text-xs truncate">{newKey}</code>
-            <CopyButton text={newKey} />
+            <code className="grow text-primary text-xs truncate">{newKey.key}</code>
+            <CopyButton text={newKey.key} />
           </div>
           <button
             onClick={() => setNewKey(undefined)}
@@ -528,7 +532,7 @@ function ApiKeysTab() {
           onClick={() => {
             void create({ name: name.trim() })
               .then((r) => {
-                setNewKey(r.key);
+                setNewKey({ id: r.id, key: r.key });
                 setName("");
               })
               .catch((e) =>
@@ -544,7 +548,7 @@ function ApiKeysTab() {
       </div>
 
       <div className="flex flex-col">
-        {(keys ?? []).map((k) => (
+        {(activeKeys ?? []).map((k) => (
           <div
             key={k._id}
             className="flex items-center gap-2.5 py-2.5 border-b border-divider last:border-0"
@@ -560,30 +564,30 @@ function ApiKeysTab() {
                 {k.lastUsedAt
                   ? ` · last used ${new Date(k.lastUsedAt).toLocaleDateString()}`
                   : ""}
-                {k.revokedAt ? " · revoked" : ""}
               </div>
             </div>
-            {!k.revokedAt && (
-              <button
-                onClick={() => {
-                  if (window.confirm(`Revoke "${k.name}"? Clients using it will lose access.`)) {
-                    void revoke({ apiKeyId: k._id }).then(
-                      () => toast("Key revoked"),
-                      (e) =>
-                        toast.error(
-                          e instanceof Error ? e.message : "Revoke failed",
-                        ),
-                    );
-                  }
-                }}
-                className="pressable h-7 px-2.5 rounded-md text-xs/4 font-medium bg-search-field text-danger"
-              >
-                Revoke
-              </button>
-            )}
+            <button
+              onClick={() => {
+                if (window.confirm(`Revoke "${k.name}"? Clients using it will lose access.`)) {
+                  void revoke({ apiKeyId: k._id }).then(
+                    () => {
+                      setNewKey(current => current?.id === k._id ? undefined : current);
+                      toast("Key revoked");
+                    },
+                    (e) =>
+                      toast.error(
+                        e instanceof Error ? e.message : "Revoke failed",
+                      ),
+                  );
+                }
+              }}
+              className="pressable h-7 px-2.5 rounded-md text-xs/4 font-medium bg-search-field text-danger"
+            >
+              Revoke
+            </button>
           </div>
         ))}
-        {keys?.length === 0 && (
+        {activeKeys?.length === 0 && (
           <div className="text-tertiary text-[13px]/4.5 py-3">
             No API keys yet.
           </div>

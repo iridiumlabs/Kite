@@ -14,7 +14,25 @@ Server-side mail connections are restricted to the exact Spacemail (`mail.spacem
 
 `EXPERIENTIAL_API_KEY` enables Jev classification. Without it, ingest uses deterministic Primary/Other heuristics and records classification for a bounded later retry. Retry category descriptions are captured at ingest, so subsequent category edits do not retroactively categorize old mail. Manual corrections take precedence over retries.
 
-See `AGENTS.md` for the architecture, data-I/O rules and local dev-auth harness. Dev auth is test-only. Never enable `KITE_DEV_AUTH`, `NEXT_PUBLIC_KITE_DEV_AUTH` or `KITE_DEV_AUTH_ISSUER` in production.
+### Test-only dev authentication
+
+The harness needs `KITE_DEV_AUTH=1`, `NEXT_PUBLIC_KITE_DEV_AUTH=1`, and a base64-encoded RSA PEM private key in `KITE_DEV_AUTH_PRIVATE_KEY` in `.env.local`. The issuer defaults to `http://localhost:3000/api/dev-auth`. Clerk's issuer is still required on Convex.
+
+After choosing a **dev** or **local** Convex deployment in `.env.local`, run:
+
+```sh
+npx tsx scripts/configure-dev-auth.mts
+npx convex dev --once
+npm run dev
+```
+
+The setup command copies only the public verification key to Convex as `KITE_DEV_AUTH_JWKS` (a data URI), and sets the matching `KITE_DEV_AUTH_ISSUER`. Cloud Convex cannot fetch JWKS from localhost; the inline public key avoids needing a tunnel. Rerun setup if you change the signing key, issuer or deployment. Existing Clerk authentication remains enabled. Test users and Clerk users have separate identities.
+
+To populate the app for manual testing, start Next and run `npx tsx scripts/seed-dev-mail.mts`. This creates **Dev Personal** and **Dev Work**, each with 12 fictional messages (including a reply thread, read/unread and starred mail, HTML, attachments, Archive, Trash and Sent) and an unsent draft. They are real Ethereal test mailboxes so reading, syncing and folder operations work; Ethereal captures outgoing mail rather than delivering it to real recipients. The script uses the selected dev deployment and the browser's test identity, never sends SMTP mail, and leaves existing seeded mailboxes unchanged on reruns. Delete these mailboxes in Settings → Connections before rerunning to reset them. Ethereal accounts are temporary, not durable storage; never use them for personal mail.
+
+For real Clerk sign-in instead, remove/disable both dev-auth flags locally, configure the Clerk keys from `.env.example`, and restart Next. Remove `KITE_DEV_AUTH_ISSUER` and `KITE_DEV_AUTH_JWKS` from Convex and push the config to stop accepting test tokens.
+
+Dev auth is test-only. Never enable `KITE_DEV_AUTH`, `NEXT_PUBLIC_KITE_DEV_AUTH`, `KITE_DEV_AUTH_ISSUER` or `KITE_DEV_AUTH_JWKS` in production. Never upload the private signing key to Convex.
 
 ## Profile and privacy
 
