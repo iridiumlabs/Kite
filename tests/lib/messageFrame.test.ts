@@ -21,6 +21,13 @@ test("frame keeps the existing script and remote-image restrictions in both them
   expect(messageFrameDoc("<p>Hello</p>", true, false)).toContain("background:#1c1c1e");
 });
 
+test("original message colors have a light canvas rather than showing the dark reader through", () => {
+  const doc = messageFrameDoc("<p>Hello</p>", false, false);
+  expect(doc).toContain('content="light"');
+  expect(doc).toContain("html,body{background:#ffffff;}");
+  expect(doc).toContain("color: #1d1d1f");
+});
+
 test("neutral light surfaces and dark text adapt without changing brand colours", () => {
   expect(darkMessageBackground("rgb(255, 255, 255)")).toBe("rgb(28, 28, 30)");
   expect(darkMessageBackground("rgb(218, 218, 220)")).toBe("rgb(35, 35, 37)");
@@ -37,14 +44,16 @@ test("adaptation handles inherited text, preserves branded and photographic pane
   type Node = {
     parentElement: Node | null;
     original: { backgroundColor: string; backgroundImage: string; color: string };
+    declaredColor?: string;
     applied: Record<string, string>;
     style: { setProperty: (name: string, value: string, priority: string) => void };
   };
   let writes = 0;
-  const node = (parent: Node | null, background: string, color = "rgb(0, 0, 0)", image = "none"): Node => {
+  const node = (parent: Node | null, background: string, color?: string, image = "none"): Node => {
     const applied: Record<string, string> = {};
     return {
-      parentElement: parent, original: { backgroundColor: background, backgroundImage: image, color }, applied,
+      parentElement: parent, declaredColor: color,
+      original: { backgroundColor: background, backgroundImage: image, color: color ?? parent?.original.color ?? "rgb(0, 0, 0)" }, applied,
       style: { setProperty: (name, value, priority) => {
         writes++;
         expect(priority).toBe("important");
@@ -60,10 +69,17 @@ test("adaptation handles inherited text, preserves branded and photographic pane
   const lightBrand = node(body, "rgb(255, 230, 100)");
   const lightBrandText = node(lightBrand, "rgba(0, 0, 0, 0)");
   const photo = node(body, "rgb(255, 255, 255)", "rgb(0, 0, 0)", 'url("https://example.com/photo.jpg")');
-  const elements = [white, text, brand, brandText, lightBrand, lightBrandText, photo];
+  const translucent = node(body, "rgba(255, 255, 255, 0.1)");
+  const translucentText = node(translucent, "rgba(0, 0, 0, 0)");
+  const nestedTranslucent = node(translucent, "rgba(255, 255, 255, 0.1)");
+  const lightTranslucent = node(body, "rgba(255, 255, 255, 0.9)");
+  const lightTranslucentText = node(lightTranslucent, "rgba(0, 0, 0, 0)");
+  const photoText = node(photo, "rgba(0, 0, 0, 0)");
+  const elements = [white, text, brand, brandText, lightBrand, lightBrandText, photo, photoText,
+    translucent, translucentText, nestedTranslucent, lightTranslucent, lightTranslucentText];
   const doc = {
     documentElement: { dataset: {} },
-    body: { ...body, querySelectorAll: () => elements },
+    body: Object.assign(body, { querySelectorAll: () => elements }),
     defaultView: { getComputedStyle: (element: Node) => {
       expect(writes).toBe(0);
       return element.original;
@@ -75,9 +91,19 @@ test("adaptation handles inherited text, preserves branded and photographic pane
   expect(writes).toBe(firstWrites);
   expect(white.applied).toMatchObject({ "background-color": "rgb(28, 28, 30)", color: "rgba(245, 245, 247, 1)" });
   expect(text.applied.color).toBe("rgba(245, 245, 247, 1)");
-  expect(brand.applied).toEqual({});
+  expect(brand.applied).toEqual({ color: "rgb(255, 255, 255)" });
   expect(brandText.applied).toEqual({});
-  expect(lightBrand.applied).toEqual({});
+  expect(lightBrand.applied).toEqual({ color: "rgb(0, 0, 0)" });
   expect(lightBrandText.applied).toEqual({});
-  expect(photo.applied).toEqual({});
+  expect(photo.applied).toEqual({ color: "rgb(0, 0, 0)" });
+  const finalColor = (element: Node): string => element.applied.color ?? element.declaredColor ??
+    (element.parentElement ? finalColor(element.parentElement) : "rgb(0, 0, 0)");
+  expect(finalColor(body)).toBe("rgba(245, 245, 247, 1)");
+  expect(finalColor(lightBrandText)).toBe("rgb(0, 0, 0)");
+  expect(finalColor(brandText)).toBe("rgb(255, 255, 255)");
+  expect(finalColor(photoText)).toBe("rgb(0, 0, 0)");
+  expect(translucent.applied).toEqual({ color: "rgba(245, 245, 247, 1)" });
+  expect(finalColor(translucentText)).toBe("rgba(245, 245, 247, 1)");
+  expect(finalColor(nestedTranslucent)).toBe("rgba(245, 245, 247, 1)");
+  expect(finalColor(lightTranslucentText)).toBe("rgb(0, 0, 0)");
 });

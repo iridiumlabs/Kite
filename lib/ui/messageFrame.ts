@@ -40,7 +40,7 @@ export function messageFrameDoc(html: string, dark: boolean, loadRemoteImages: b
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${loadRemoteImages ? "https: " : ""}data:; style-src 'unsafe-inline'; font-src 'self' data:;">
 <base target="_blank">
 ${FRAME_STYLE}
-${dark ? "<style>html,body{background:#1c1c1e;}</style>" : ""}
+<style>html,body{background:${dark ? "#1c1c1e" : "#ffffff"};}</style>
 </head><body><div id="kite-message-content">${html}</div></body></html>`;
 }
 
@@ -80,13 +80,22 @@ export function adaptDarkMessage(doc: Document) {
     return { element, background: style.backgroundColor, image: style.backgroundImage, color: style.color };
   });
   const darkSurface = new Map<Element, boolean>();
+  const surfaces = new Map<Element, ReturnType<typeof rgb>>();
+  surfaces.set(doc.documentElement, rgb("rgb(28, 28, 30)"));
   for (const { element, background, image, color } of styles) {
     const adaptedBackground = darkMessageBackground(background);
-    const original = rgb(background);
-    const transparent = !original || original.alpha === 0;
-    const onDark = image === "none" && (transparent
-      ? (element.parentElement ? (darkSurface.get(element.parentElement) ?? true) : true)
-      : !!adaptedBackground || (original.neutral && original.lightness < 100));
+    const parentSurface = surfaces.get(element.parentElement ?? doc.documentElement);
+    let surface = rgb(adaptedBackground ?? background);
+    if (!surface || surface.alpha === 0) {
+      surface = parentSurface;
+    } else if (surface.alpha < 1) {
+      const { r, g, b, alpha } = surface;
+      surface = parentSurface ? rgb(`rgb(${r * alpha + parentSurface.r * (1 - alpha)}, ${g * alpha + parentSurface.g * (1 - alpha)}, ${b * alpha + parentSurface.b * (1 - alpha)})`) : undefined;
+    }
+    // Background images have unknown pixel colors; don't guess their contrast.
+    if (image !== "none") surface = undefined;
+    surfaces.set(element, surface);
+    const onDark = !!surface?.neutral && surface.lightness < 100;
     darkSurface.set(element, onDark);
     if (adaptedBackground && image === "none") {
       element.style.setProperty("background-color", adaptedBackground, "important");
@@ -94,6 +103,10 @@ export function adaptDarkMessage(doc: Document) {
     if (onDark) {
       const foreground = darkMessageForeground(color);
       if (foreground) element.style.setProperty("color", foreground, "important");
+    } else if (!element.parentElement || darkSurface.get(element.parentElement) !== false) {
+      // Freeze the original text at preserved-panel boundaries; otherwise it
+      // would inherit the lightened foreground from an adapted ancestor.
+      element.style.setProperty("color", color, "important");
     }
   }
 }
