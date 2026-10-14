@@ -34,7 +34,8 @@ export const list = query({
       .query("apiKeys")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
-    return docs.map((d) => ({
+    // Retain revocation records for authentication, but only show active keys.
+    return docs.filter((d) => d.revokedAt === undefined).map((d) => ({
       _id: d._id,
       name: d.name,
       prefix: d.prefix,

@@ -24,7 +24,7 @@ test.each(["latest", "unread", "older"])("message %s can expand, collapse, and r
       const next = toggleMessageExpansion(messageId, expandedMessageIds(defaults, collapsed, extra), collapsed, extra);
       collapsed = next.collapsed; extra = next.extra;
     },
-    onArchive: vi.fn(), onTrash: vi.fn(), onTag: null, onSnooze: null,
+    onClose: vi.fn(), onArchive: vi.fn(), onTrash: vi.fn(), onTag: null, onSnooze: null,
     onMarkUnread: vi.fn(), onStar: vi.fn(), onMore: null,
     onReply: vi.fn(), onReplyAll: vi.fn(), onForward: vi.fn(), onDownloadAttachment: vi.fn(),
   };
@@ -48,6 +48,12 @@ test.each(["latest", "unread", "older"])("message %s can expand, collapse, and r
   click(control(`Expand message from ${id}`));
   expect(expandedMessageIds(defaults, collapsed, extra).has(id)).toBe(true);
   expect(props.onReply).not.toHaveBeenCalled();
+  const close = find(Reader(props), el => el.props.label === "Close email")!;
+  const renderClose = close.type as (props: Record<string, unknown>) => ReactElement;
+  const closeButton = renderClose(close.props) as ReactElement<Record<string, unknown>>;
+  expect(closeButton.props["aria-label"]).toBe("Close email");
+  click(closeButton);
+  expect(props.onClose).toHaveBeenCalledOnce();
 });
 
 test("an explicit collapse wins even when a message later becomes unread", () => {

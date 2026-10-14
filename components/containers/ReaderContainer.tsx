@@ -31,7 +31,7 @@ import {
   contentSnapshot,
   serverContentSnapshot,
 } from "@/lib/ui/contentCache";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 
 function toMessageItem(m: Doc<"messages">): MessageItem {
   return {
@@ -322,7 +322,11 @@ export function ReaderContainer({
   if (data === undefined) {
     return (
       <div className="flex flex-col grow basis-0 h-full bg-app min-w-0">
-        <div className="h-13 border-b border-divider" />
+        <div className="flex items-center h-13 shrink-0 px-12 max-[1200px]:px-6 max-[767px]:px-3">
+          <button aria-label={mobileBack ? "Back" : "Close email"} title="Close email" onClick={onClose} className="icon-btn w-8 h-7">
+            {mobileBack ? <ArrowLeft size={17} strokeWidth={1.7} /> : <X size={17} strokeWidth={1.7} />}
+          </button>
+        </div>
         <div className="flex flex-col pt-8 px-14 gap-4">
           <div className="skeleton h-7 w-2/3" />
           <div className="skeleton h-4 w-1/3" />
@@ -354,6 +358,7 @@ export function ReaderContainer({
 
   return (
     <Reader
+      onClose={onClose}
       subject={data.thread.subject}
       messageCount={messages.length}
       accountEmail={
@@ -430,6 +435,7 @@ export function ReaderContainer({
         mobileBack ? (
           <button
             aria-label="Back"
+            title="Close email"
             onClick={mobileBack}
             className="icon-btn w-8 h-7"
           >

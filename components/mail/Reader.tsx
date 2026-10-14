@@ -13,6 +13,7 @@ import {
   ReplyAllIcon,
   ForwardIcon,
 } from "@/components/icons";
+import { X } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { MessageBody } from "./MessageBody";
 import { AttachmentCard } from "./AttachmentCard";
@@ -33,6 +34,7 @@ export interface ReaderProps {
   expandedIds: Set<string>;
   onToggleMessage: (id: string) => void;
   // toolbar
+  onClose: () => void;
   inTrash?: boolean;
   starred?: boolean;
   onArchive: () => void;
@@ -212,7 +214,9 @@ function ExpandedMessage({
           </button>
         </div>
       ) : null}
-      <div className="flex flex-col max-w-175 pl-12">
+      <div className={content?.html
+        ? "flex flex-col w-full min-w-0"
+        : "flex flex-col max-w-175 pl-12 max-[767px]:pl-0"}>
         <MessageBody
           content={content}
           dark={dark}
@@ -279,8 +283,12 @@ export function Reader(p: ReaderProps) {
   return (
     <div className="flex flex-col grow basis-0 h-full bg-app min-w-0">
       <div className="flex items-center justify-between h-13 shrink-0 px-12 max-[1200px]:px-6 max-[767px]:px-3">
-        <div className="flex items-center gap-1">
-          {p.headerLeft}
+        <div className="flex items-center gap-1 max-[400px]:gap-0.5">
+          {p.headerLeft ?? (
+            <ToolbarButton label="Close email" onClick={p.onClose}>
+              <X size={17} strokeWidth={1.7} />
+            </ToolbarButton>
+          )}
           <ToolbarButton label="Archive" onClick={p.onArchive}>
             <Archive strokeWidth={1.7} />
           </ToolbarButton>
@@ -294,7 +302,7 @@ export function Reader(p: ReaderProps) {
             <Mail />
           </ToolbarButton>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 max-[400px]:gap-0.5">
           <ToolbarButton
             label={p.starred ? "Unstar" : "Star"}
             onClick={p.onStar}

@@ -2,47 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { MessageContent } from "@/lib/ui/types";
-
-const FRAME_STYLE = `
-  <style>
-    html, body { margin: 0; padding: 0; }
-    body {
-      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
-        Roboto, Helvetica, Arial, sans-serif;
-      font-size: 14px;
-      line-height: 22px;
-      color: #1d1d1f;
-      word-wrap: break-word;
-    }
-    a { color: #007aff; text-decoration: none; }
-    img { max-width: 100%; height: auto; }
-    p { margin: 0 0 14px; }
-    ul, ol { margin: 0 0 14px; padding-left: 20px; }
-    ul { list-style: disc; }
-    ol { list-style: decimal; }
-    li + li { margin-top: 6px; }
-    li::marker { color: #8a8a8e; }
-    blockquote {
-      margin: 0 0 14px;
-      padding-left: 10px;
-      border-left: 2px solid #0000001f;
-      color: #6e6e73;
-    }
-    pre { white-space: pre-wrap; }
-  </style>
-`;
-
-function frameDoc(html: string, dark: boolean, loadRemoteImages: boolean) {
-  const darkCss = dark
-    ? `<style>body{background:#ffffff;border-radius:8px;padding:8px;}</style>`
-    : "";
-  return `<!DOCTYPE html><html><head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${loadRemoteImages ? "https: " : ""}data:; style-src 'unsafe-inline'; font-src 'self' data:;">
-<base target="_blank">
-${FRAME_STYLE}${darkCss}
-</head><body>${html}</body></html>`;
-}
+import { adaptDarkMessage, messageFrameDoc } from "@/lib/ui/messageFrame";
 
 function linkify(text: string) {
   const urlRe = /(https?:\/\/[^\s<>"']+)/g;
@@ -64,7 +24,7 @@ function linkify(text: string) {
   );
 }
 
-function QuotedBlock({ children, html, loadRemoteImages }: { children?: string; html?: string; loadRemoteImages?: boolean }) {
+function QuotedBlock({ children, html, loadRemoteImages, dark }: { children?: string; html?: string; loadRemoteImages?: boolean; dark?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-1">
@@ -79,7 +39,7 @@ function QuotedBlock({ children, html, loadRemoteImages }: { children?: string; 
       {open &&
         (html ? (
           <div className="mt-2 text-secondary">
-            <MessageBody content={{ html, loadRemoteImages }} />
+            <MessageBody content={{ html, loadRemoteImages }} dark={dark} />
           </div>
         ) : (
           <div className="mt-2 whitespace-pre-wrap text-secondary text-sm/5.5">
@@ -103,6 +63,8 @@ export function MessageBody({
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(120);
+  const [originalColors, setOriginalColors] = useState(false);
+  const adaptDark = dark && !originalColors;
   const html = content?.html;
   const text = content?.text;
 
@@ -110,6 +72,7 @@ export function MessageBody({
   if (prevHtml !== html) {
     setPrevHtml(html);
     setHeight(120);
+    setOriginalColors(false);
   }
 
   useEffect(() => {
@@ -137,6 +100,7 @@ export function MessageBody({
       style.id = "kite-fonts";
       style.textContent = `${faces.join("\n")} body { font-family: ${getComputedStyle(document.body).fontFamily}; }`;
       if (!style.isConnected) doc.head.append(style);
+      if (adaptDark) adaptDarkMessage(doc);
       const measure = () => {
         if (disposed || frame.contentDocument !== doc) return;
         // Measuring the body lets the frame shrink as well as grow. The root's
@@ -157,22 +121,33 @@ export function MessageBody({
       observer?.disconnect();
       frame.removeEventListener("load", initialize);
     };
-  }, [html, dark, content?.loadRemoteImages]);
+  }, [html, adaptDark, content?.loadRemoteImages]);
   if (html) {
     const truncated =
       maxChars && html.length > maxChars ? html.slice(0, maxChars) : html;
     return (
-      <div className={dark ? "rounded-lg overflow-hidden" : undefined}>
+      <div className="min-w-0">
+        {dark && (
+          <div className="flex justify-end mb-2">
+            <button
+              className="pressable text-tertiary text-xs/4"
+              aria-pressed={originalColors}
+              onClick={() => setOriginalColors(value => !value)}
+            >
+              {originalColors ? "Use dark colors" : "Show original colors"}
+            </button>
+          </div>
+        )}
         <iframe
           ref={iframeRef}
           title="Message"
           className="body-frame"
           sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-          srcDoc={frameDoc(truncated, dark, content?.loadRemoteImages ?? false)}
+          srcDoc={messageFrameDoc(truncated, adaptDark, content?.loadRemoteImages ?? false)}
           style={{ height }}
         />
         {content?.quotedHtml && (
-          <QuotedBlock html={content.quotedHtml} loadRemoteImages={content.loadRemoteImages} />
+          <QuotedBlock html={content.quotedHtml} loadRemoteImages={content.loadRemoteImages} dark={adaptDark} />
         )}
       </div>
     );

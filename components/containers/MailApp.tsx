@@ -21,6 +21,7 @@ import { useTheme } from "next-themes";
 import { Sidebar } from "@/components/mail/Sidebar";
 import { ListHeader } from "@/components/mail/ListHeader";
 import { ThreadList } from "@/components/mail/ThreadList";
+import { ReaderTransition } from "@/components/mail/ReaderTransition";
 import { CommandPalette } from "@/components/mail/CommandPalette";
 import { useUI, type SettingsTab } from "@/lib/ui/store";
 import { useAppUser, DEV_AUTH } from "@/components/providers";
@@ -46,6 +47,7 @@ import { PanelLeft } from "lucide-react";
 import { Dialog } from "@base-ui/react/dialog";
 import { SignOutListener } from "@/components/SignOutListener";
 import { isThreadListView } from "@/lib/ui/threadViews";
+import { readerNavigationOptions } from "@/lib/ui/readerNavigation";
 
 function parseSlug(slug?: string[]): {
   view: ViewKind;
@@ -370,13 +372,19 @@ export function MailApp() {
         ui.openCompose({ mode: "draft", draftId: t.id });
         return;
       }
-      router.push(`${viewPath(view, viewId)}/t/${t.id}`);
+      router.push(
+        `${viewPath(view, viewId)}/t/${t.id}`,
+        readerNavigationOptions(document.documentElement.getAttribute("data-motion-input")),
+      );
     },
     [router, view, viewId, ui],
   );
 
   const closeThread = useCallback(() => {
-    router.push(viewPath(view, viewId));
+    router.push(
+      viewPath(view, viewId),
+      readerNavigationOptions(document.documentElement.getAttribute("data-motion-input")),
+    );
   }, [router, view, viewId]);
 
   // ---- actions with undo ----
@@ -935,52 +943,55 @@ export function MailApp() {
         </Dialog.Root>
       )}
 
-      {/* Content */}
-      {noAccounts && !loading ? (
-        <div className="flex flex-col items-center justify-center grow gap-4">
-          <div className="font-semibold text-primary text-[15px]/4.5">
-            Connect your Spacemail mailbox
+      {/* Crossfade the list/reader handoff, not the sidebar or floating controls.
+          All untyped navigations and background data updates stay instant. */}
+      <ReaderTransition>
+        {noAccounts && !loading ? (
+          <div className="flex flex-col items-center justify-center grow gap-4">
+            <div className="font-semibold text-primary text-[15px]/4.5">
+              Connect your Spacemail mailbox
+            </div>
+            <div className="text-tertiary text-[13px]/4 max-w-80 text-center">
+              Kite syncs your mail over IMAP and SMTP. Add your first account to
+              get started.
+            </div>
+            <button
+              onClick={() => setConnectOpen(true)}
+              className="pressable h-8 px-3 rounded-lg bg-accent text-white font-semibold text-[13px]/4"
+            >
+              Connect account
+            </button>
           </div>
-          <div className="text-tertiary text-[13px]/4 max-w-80 text-center">
-            Kite syncs your mail over IMAP and SMTP. Add your first account to
-            get started.
-          </div>
-          <button
-            onClick={() => setConnectOpen(true)}
-            className="pressable h-8 px-3 rounded-lg bg-accent text-white font-semibold text-[13px]/4"
-          >
-            Connect account
-          </button>
-        </div>
-      ) : isMobile && threadId ? (
-        <ReaderContainer
-          threadId={threadId as Id<"threads">}
-          categories={categoryInfos}
-          threads={threads}
-          onClose={closeThread}
-          onNavigateThread={(id) =>
-            router.push(`${viewPath(view, viewId)}/t/${id}`)
-          }
-          mobileBack={closeThread}
-          dark={resolvedTheme === "dark"}
-        />
-      ) : (
-        <>
-          {listPane}
-          {threadId && (
-            <ReaderContainer
-              threadId={threadId as Id<"threads">}
-              categories={categoryInfos}
-              threads={threads}
-              onClose={closeThread}
-              onNavigateThread={(id) =>
-                router.push(`${viewPath(view, viewId)}/t/${id}`)
-              }
-              dark={resolvedTheme === "dark"}
-            />
-          )}
-        </>
-      )}
+        ) : isMobile && threadId ? (
+          <ReaderContainer
+            threadId={threadId as Id<"threads">}
+            categories={categoryInfos}
+            threads={threads}
+            onClose={closeThread}
+            onNavigateThread={(id) =>
+              router.push(`${viewPath(view, viewId)}/t/${id}`)
+            }
+            mobileBack={closeThread}
+            dark={resolvedTheme === "dark"}
+          />
+        ) : (
+          <>
+            {listPane}
+            {threadId && (
+              <ReaderContainer
+                threadId={threadId as Id<"threads">}
+                categories={categoryInfos}
+                threads={threads}
+                onClose={closeThread}
+                onNavigateThread={(id) =>
+                  router.push(`${viewPath(view, viewId)}/t/${id}`)
+                }
+                dark={resolvedTheme === "dark"}
+              />
+            )}
+          </>
+        )}
+      </ReaderTransition>
 
       <CommandPalette
         open={ui.paletteOpen}

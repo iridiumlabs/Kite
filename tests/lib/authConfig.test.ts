@@ -39,6 +39,26 @@ test("an explicitly configured dev issuer still works for local testing", () => 
   ]);
 });
 
+test("cloud dev auth uses inline public keys instead of fetching localhost", () => {
+  const devIssuer = "http://localhost:3000/api/dev-auth";
+  const devJwks = "data:text/plain;charset=utf-8;base64,eyJrZXlzIjpbXX0=";
+  expect(evaluate({
+    CLERK_JWT_ISSUER_DOMAIN: clerkIssuer,
+    KITE_DEV_AUTH_ISSUER: devIssuer,
+    KITE_DEV_AUTH_JWKS: devJwks,
+  }, true)).toEqual([
+    { domain: clerkIssuer, applicationID: "convex" },
+    { type: "customJwt", issuer: devIssuer, jwks: devJwks, applicationID: "convex", algorithm: "RS256" },
+  ]);
+});
+
+test("inline keys alone do not enable dev auth", () => {
+  expect(evaluate({
+    CLERK_JWT_ISSUER_DOMAIN: clerkIssuer,
+    KITE_DEV_AUTH_JWKS: "data:text/plain;base64,eyJrZXlzIjpbXX0=",
+  }, true)).toEqual([{ domain: clerkIssuer, applicationID: "convex" }]);
+});
+
 test("missing required Clerk configuration is not swallowed", () => {
   expect(() => evaluate({}, true)).toThrow("CLERK_JWT_ISSUER_DOMAIN");
 });

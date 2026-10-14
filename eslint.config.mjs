@@ -10,6 +10,7 @@ const eslintConfig = defineConfig([
     "node_modules/**",
     "convex/_generated/**",
     "design/**",
+    "artifacts/**",
     ".agents/**",
     "next-env.d.ts",
   ]),

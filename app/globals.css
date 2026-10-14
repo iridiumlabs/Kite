@@ -376,6 +376,41 @@ body {
   color: var(--text-quaternary);
 }
 
+/* Route snapshots bridge the list resizing and reader arriving. No geometry
+   tween, no artificial navigation delay, and clicks reach the live interface. */
+::view-transition {
+  pointer-events: none;
+}
+::view-transition-group(.reader-crossfade) {
+  animation: none;
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+::view-transition-old(.reader-crossfade) {
+  animation: reader-fade-out var(--motion-control) var(--ease-out) both;
+}
+::view-transition-new(.reader-crossfade) {
+  animation: reader-fade-in var(--motion-control) var(--ease-out) both;
+}
+@keyframes reader-fade-out {
+  to { opacity: 0; }
+}
+@keyframes reader-fade-in {
+  from { opacity: 0; }
+}
+:root[data-motion-input="keyboard"]::view-transition-old(.reader-crossfade),
+:root[data-motion-input="keyboard"]::view-transition-new(.reader-crossfade) {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(.reader-crossfade),
+  ::view-transition-new(.reader-crossfade) {
+    animation-duration: 80ms;
+  }
+}
+
 /* Message iframe */
 .body-frame {
   width: 100%;

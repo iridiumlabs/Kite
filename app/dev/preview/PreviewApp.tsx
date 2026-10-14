@@ -86,6 +86,7 @@ function PreviewReader({ dark }: { dark: boolean }) {
   const [expanded] = useState(() => new Set(["m-3"]));
   return (
     <Reader
+      onClose={noop}
       subject="Re: Kite beta onboarding feedback"
       messageCount={3}
       accountEmail="arham@gmail.com"
